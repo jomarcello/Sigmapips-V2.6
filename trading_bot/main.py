@@ -5090,3 +5090,105 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
             text = text.replace(char, f'\\{char}')
         
         return text
+
+    async def run(self):
+        """Run the telegram bot application"""
+        try:
+            logger.info("Setting up and running the Telegram bot")
+            
+            # Make sure handlers are properly registered
+            if hasattr(self, 'application') and self.application:
+                # Ensure the menu_command handler is correctly registered
+                # Re-register it to be sure
+                self.application.add_handler(CommandHandler("menu", self.menu_command))
+                logger.info("Re-registered /menu command handler")
+                
+                # Initialize application
+                if hasattr(self, 'init_task') and self.init_task:
+                    await self.init_task
+                    logger.info("Application initialized")
+                else:
+                    # Initialize directly if no task exists
+                    await self.application.initialize()
+                    logger.info("Application initialized directly")
+                
+                # Set commands if task exists
+                if hasattr(self, 'set_commands_task') and self.set_commands_task:
+                    await self.set_commands_task
+                    logger.info("Bot commands set")
+                
+                # Initialize services
+                await self.initialize_services()
+                logger.info("Services initialized")
+                
+                # Start the bot
+                await self.application.start()
+                logger.info("Bot started, running until stopped")
+                
+                # If we made it this far, set the bot_started flag
+                self.bot_started = True
+                
+                # Run the bot until it receives a stop signal
+                await self.application.updater.start_polling(drop_pending_updates=True)
+                logger.info("Bot polling started")
+                
+                # Run until stopped
+                await self.application.updater.idle()
+                logger.info("Bot stopped")
+                
+            else:
+                logger.error("Application not properly initialized")
+                raise RuntimeError("Application not properly initialized")
+                
+        except Exception as e:
+            logger.error(f"Error running the bot: {str(e)}")
+            logger.exception(e)
+            raise
+
+if __name__ == "__main__":
+    # Create parser for command-line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description="Trading Bot")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--log-level", type=str, default="INFO", help="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+    args = parser.parse_args()
+    
+    # Setup logging based on command line arguments
+    logger = setup_logging(args.log_level)
+    logger.info("Starting trading bot")
+    
+    # Set to sync mode for deployment on Railway
+    try:
+        # Initialize database connection
+        from trading_bot.services.database.db import Database
+        db = Database()
+        logger.info("Database connection initialized")
+        
+        # Initialize Stripe service if needed
+        stripe_service = None
+        try:
+            from trading_bot.services.payment_service.stripe_service import StripeService
+            stripe_service = StripeService()
+            logger.info("Stripe service initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Stripe service: {str(e)}")
+            
+        # Initialize Telegram service with the database
+        try:
+            telegram_service = TelegramService(db=db, stripe_service=stripe_service)
+            logger.info("Telegram service initialized")
+            
+            # Print bot info
+            if hasattr(telegram_service, 'bot') and telegram_service.bot:
+                bot_info = telegram_service.bot.get_me()
+                logger.info(f"Bot info: {bot_info}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Telegram service: {str(e)}")
+            raise
+        
+        # Run the bot
+        asyncio.run(telegram_service.run())
+            
+    except Exception as e:
+        logger.error(f"Error in main function: {str(e)}")
+        logger.exception(e)
