@@ -489,6 +489,7 @@ def _detect_market(instrument: str) -> str:
         "XAGUSD",  # Silver
         "WTIUSD",  # Oil WTI
         "BCOUSD",  # Oil Brent
+        "USOIL",   # Oil WTI (alternative symbol)
     ]
     if instrument in commodities:
         logger.info(f"Detected {instrument} as commodity")

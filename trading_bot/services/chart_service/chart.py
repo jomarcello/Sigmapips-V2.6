@@ -1220,7 +1220,7 @@ Moving Averages: {ma_analysis}
         indices = ['US30', 'US500', 'US100', 'DE40', 'UK100', 'FR40', 'JP225', 'AU200', 'EU50']
         
         # List of common commodities
-        commodities = ['XAUUSD', 'XAGUSD', 'XTIUSD', 'XBRUSD', 'XCUUSD']
+        commodities = ['XAUUSD', 'XAGUSD', 'XTIUSD', 'XBRUSD', 'XCUUSD', 'USOIL']
         
         # Crypto prefixes and common cryptos
         crypto_prefixes = ['BTC', 'ETH', 'XRP', 'LTC', 'BCH', 'BNB', 'ADA', 'DOT', 'LINK', 'XLM']

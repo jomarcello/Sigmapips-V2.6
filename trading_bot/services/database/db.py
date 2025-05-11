@@ -978,7 +978,7 @@ class Database:
                 return "indices"
          
         # Check if it's a commodity
-        commodities = ["GOLD", "SILVER", "OIL", "GAS", "XAU", "XAG"]
+        commodities = ["GOLD", "SILVER", "OIL", "GAS", "XAU", "XAG", "USOIL"]
         for commodity in commodities:
             if commodity in instrument:
                 return "commodities"
