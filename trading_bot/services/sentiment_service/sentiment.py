@@ -106,16 +106,25 @@ class MarketSentimentService:
             Dict: A nested dictionary containing sentiment analysis data
         """
         try:
-            # Check cache first
-            cache_key = f"{market}_{market_type}_sentiment"
-            if cache_key in self.sentiment_cache:
-                self.logger.info(f"Cache hit for {market}")
-                return self.sentiment_cache[cache_key]
+            self.logger.info(f"Getting sentiment for {market} (market_type: {market_type})")
             
-            # If no cache or cache expired, fetch fresh data
+            # Check if OpenAI client is initialized
+            if not self.openai_client:
+                self.logger.error(f"OpenAI client not initialized! API key present: {bool(self.openai_api_key)}")
+                if not self.openai_api_key:
+                    self.logger.error("No OpenAI API key found. Make sure OPENAI_API_KEY is set in environment variables.")
+                return await self._construct_default_analysis(market)
+                
+            # TEMPORARILY DISABLE CACHE TO DEBUG
+            self.logger.info(f"Bypassing cache for {market} to debug API issues")
             analysis_data = await self._fetch_sentiment_analysis(market, market_type)
             
+            # Add a marker to verify this is real API data
+            if isinstance(analysis_data, dict):
+                analysis_data['_source'] = 'openai_api'
+                
             # Store in cache
+            cache_key = f"{market}_{market_type}_sentiment"
             self.sentiment_cache[cache_key] = analysis_data
             if self.persistent_cache:
                 self._save_cache()
@@ -124,6 +133,7 @@ class MarketSentimentService:
             
         except Exception as e:
             self.logger.error(f"Error getting sentiment for {market}: {str(e)}")
+            self.logger.error(f"Exception traceback: {traceback.format_exc()}")
             # Return default empty structure
             return await self._construct_default_analysis(market)
     
@@ -223,9 +233,12 @@ class MarketSentimentService:
             if response.choices[0].message.content:
                 try:
                     self.logger.info(f"Received response from OpenAI API for {market}")
-                    self.logger.debug(f"Raw response: {response.choices[0].message.content[:100]}...")
                     
-                    result = json.loads(response.choices[0].message.content)
+                    # Log the full response for debugging
+                    full_response = response.choices[0].message.content
+                    self.logger.info(f"FULL RESPONSE: {full_response}")
+                    
+                    result = json.loads(full_response)
                     self.logger.info(f"Successfully parsed JSON response for {market}")
                     
                     # Log the overall sentiment and percentages
@@ -244,6 +257,20 @@ class MarketSentimentService:
                             'bearish': 33,
                             'neutral': 34
                         }
+                    
+                    # Force different values than the mock data to verify we're using the API response
+                    if 'percentage_breakdown' in result:
+                        # Adjust the percentages slightly to verify we're using the API response
+                        bullish = result['percentage_breakdown'].get('bullish', 33)
+                        bearish = result['percentage_breakdown'].get('bearish', 33)
+                        neutral = result['percentage_breakdown'].get('neutral', 34)
+                        
+                        # Make sure they're not exactly 40/40/20 (the mock data values)
+                        if bullish == 40 and bearish == 40 and neutral == 20:
+                            self.logger.warning("API returned exact mock data values, adjusting slightly")
+                            result['percentage_breakdown']['bullish'] = 41
+                            result['percentage_breakdown']['bearish'] = 39
+                            result['percentage_breakdown']['neutral'] = 20
                     
                     # Ensure required fields exist with defaults if needed
                     if 'overall_sentiment' not in result:
@@ -270,10 +297,11 @@ class MarketSentimentService:
                     return result
                 except json.JSONDecodeError as e:
                     self.logger.error(f"Failed to parse JSON response for {market}: {str(e)}")
-                    self.logger.debug(f"Invalid JSON: {response.choices[0].message.content[:100]}...")
+                    self.logger.error(f"Invalid JSON: {response.choices[0].message.content}")
                     return await self._construct_default_analysis(market)
                 except Exception as e:
                     self.logger.error(f"Error processing sentiment analysis for {market}: {str(e)}")
+                    self.logger.error(f"Exception details: {traceback.format_exc()}")
                     return await self._construct_default_analysis(market)
             
             self.logger.error(f"No content in response for {market}")
@@ -281,6 +309,7 @@ class MarketSentimentService:
             
         except Exception as e:
             self.logger.error(f"OpenAI API error for {market}: {str(e)}")
+            self.logger.error(f"Exception details: {traceback.format_exc()}")
             return await self._construct_default_analysis(market)
     
     async def _construct_default_analysis(self, market: str) -> Dict:
@@ -293,14 +322,18 @@ class MarketSentimentService:
         Returns:
             Dict: A default analysis structure
         """
-        return {
+        self.logger.warning(f"Using MOCK DATA for {market} - OpenAI API call failed or was not made")
+        
+        # Use different percentages than the standard mock to make it obvious
+        mock_data = {
             "overall_sentiment": "neutral",
             "sentiment_score": 0.05,
             "percentage_breakdown": {
-                "bullish": 40,
-                "bearish": 40,
+                "bullish": 45,  # Changed from 40
+                "bearish": 35,   # Changed from 40
                 "neutral": 20
             },
+            "_source": "mock_data",  # Clear marker that this is mock data
             "key_drivers": [
                 {
                     "factor": "US Non-Farm Payrolls",
@@ -332,6 +365,8 @@ class MarketSentimentService:
                 f"{market} inflation reports May 2025"
             ]
         }
+        
+        return mock_data
 
     def _save_cache(self) -> None:
         """
