@@ -548,25 +548,46 @@ class ChartService:
                                 break
                             except:
                                 continue
+                                
+                        # Wait for indicator elements to appear
+                        logger.info("Waiting for indicators to appear...")
+                        indicator_selectors = [
+                            '.pane-legend-line', 
+                            '.pane-legend-item-value-wrap',
+                            '.study-pane',
+                            '.pane-legend-line__value'
+                        ]
+                        
+                        for selector in indicator_selectors:
+                            try:
+                                await page.wait_for_selector(selector, timeout=5000)
+                                logger.info(f"Found indicator element: {selector}")
+                                break
+                            except Exception as ind_e:
+                                logger.warning(f"Couldn't find indicator element {selector}: {str(ind_e)}")
+                                continue
                     except Exception as wait_e:
                         logger.warning(f"Wait error: {str(wait_e)}, continuing anyway")
                     
                     # Give time for chart to fully render
-                    await page.wait_for_timeout(5000)
+                    logger.info("Waiting for indicators to fully render...")
+                    await page.wait_for_timeout(10000)
                     
                     # Try to go fullscreen
                     try:
                         await page.keyboard.press("Shift+F")
-                        await page.wait_for_timeout(1000)
+                        await page.wait_for_timeout(2000)
                     except:
                         logger.warning("Couldn't enter fullscreen, continuing anyway")
                     
                     # Take screenshot
-                    logger.info("Taking screenshot")
+                    logger.info(f"Taking screenshot for {instrument} now...")
                     screenshot_bytes = await page.screenshot(type='jpeg', quality=90)
+                    logger.info(f"Screenshot taken, size: {len(screenshot_bytes) / 1024:.2f} KB")
                     
                     # Close browser
                     await browser.close()
+                    logger.info("Browser closed")
                     
                 except Exception as navigation_e:
                     logger.error(f"Error during screenshot: {str(navigation_e)}")
