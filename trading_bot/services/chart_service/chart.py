@@ -523,6 +523,22 @@ class ChartService:
                         device_scale_factor=1
                     )
                     
+                    # Get the session ID from environment
+                    session_id = os.environ.get('TRADINGVIEW_SESSION_ID', '')
+                    if session_id:
+                        logger.info(f"Adding TradingView session cookie: {session_id[:5]}...")
+                        # Add session cookie
+                        await context.add_cookies([
+                            {
+                                "name": "sessionid",
+                                "value": session_id,
+                                "domain": ".tradingview.com",
+                                "path": "/"
+                            }
+                        ])
+                    else:
+                        logger.warning("No TradingView session ID found in environment variables")
+                    
                     # Create page
                     page = await context.new_page()
                 except Exception as page_e:
@@ -1288,10 +1304,6 @@ Moving Averages: {ma_analysis}
         # Get the base URL from chart_links
         base_url = self.chart_links[instrument]
         
-        # Get the session ID from environment or use a default
-        # This is crucial for authentication with TradingView
-        session_id = os.environ.get('TRADINGVIEW_SESSION_ID', 'z90l85p2anlgdwfppsrdnnfantz48z1o')
-        
         # Map timeframe to TradingView format
         tv_timeframe_map = {
             '1h': '60',
@@ -1318,8 +1330,7 @@ Moving Averages: {ma_analysis}
                     params[key] = value
         
         # Add essential parameters
-        params['session'] = session_id
-        params['timeframe'] = tv_timeframe
+        params['interval'] = tv_timeframe
         
         # Add theme parameter for consistency
         params['theme'] = 'dark'
@@ -1331,9 +1342,7 @@ Moving Averages: {ma_analysis}
         query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
         final_url = f"{base_url}?{query_string}"
         
-        # Log the URL (hide session ID for security)
-        masked_url = final_url.replace(session_id, "***SESSION-ID***")
-        logger.info(f"Using TradingView URL: {masked_url}")
+        logger.info(f"Using TradingView URL: {final_url}")
         
         return final_url
 
