@@ -1,26 +1,25 @@
 """
-Simple chronological economic calendar formatter for TradingView API data.
-This module is designed to format economic calendar events from the TradingView API
+Chronological economic calendar formatter for TradingView API data.
+This module formats economic calendar events from the TradingView API
 in chronological order by time.
 
-It is intended to work with existing calendar service implementations that already
-handle the API integration, such as the trading_bot.services.calendar_service.tradingview_calendar
-service.
+It is designed to work with the existing calendar service implementations
+that handle the API integration.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Dict, Any
 
-# Configureer logging
+# Configure logging
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Definieer de major currencies
+# Define the major currencies
 MAJOR_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD"]
 
-# Emoji's voor valuta vlaggen
+# Emoji's for currency flags
 CURRENCY_FLAGS = {
     "USD": "🇺🇸",
     "EUR": "🇪🇺",
@@ -32,7 +31,7 @@ CURRENCY_FLAGS = {
     "CAD": "🇨🇦"
 }
 
-# Emoji's voor impact levels
+# Emoji's for impact levels
 IMPACT_EMOJI = {
     "High": "🔴",
     "Medium": "🟠",
@@ -176,13 +175,13 @@ def format_calendar_events_by_currency(events: List[Dict], today_formatted: str 
     
     return "\n".join(output)
 
-# Function to integrate with existing trading_bot calendar service
-def format_bot_calendar_events(events, group_by_currency=False, today_formatted=None):
+# Integration function for TradingViewCalendarService
+def format_tradingview_calendar(events, group_by_currency=False, today_formatted=None):
     """
-    Format calendar events for the trading bot.
+    Format TradingView calendar events for display.
     
     Args:
-        events: List of calendar events from the trading bot's calendar service
+        events: List of calendar events from TradingViewCalendarService
         group_by_currency: Whether to group events by currency (default: False)
         today_formatted: Optional formatted date string to use in the header
         

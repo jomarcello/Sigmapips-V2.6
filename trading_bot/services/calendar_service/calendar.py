@@ -87,6 +87,18 @@ if AI_SERVICES_ENABLED:
             logger.warning(f"TradingViewCalendarService could not be loaded: {str(e)}")
             HAS_TRADINGVIEW_SERVICE = False
         
+        # Try to import our chronological formatter
+        try:
+            from trading_bot.services.calendar_service.chronological_formatter import (
+                format_calendar_events_chronologically,
+                format_calendar_events_by_currency
+            )
+            HAS_CHRONOLOGICAL_FORMATTER = True
+            logger.info("Successfully imported chronological calendar formatter")
+        except ImportError:
+            HAS_CHRONOLOGICAL_FORMATTER = False
+            logger.warning("Chronological calendar formatter not available")
+        
         # If we reach here, all required AI services are imported
         HAS_AI_SERVICES = True
         logger.info("Successfully loaded all required AI services")
@@ -1009,6 +1021,46 @@ IMPORTANT: ONLY return the JSON with TODAY's events. No explanation text.
             # Voeg andere methodes toe indien nodig
         
         return MockCalendarService()
+
+    async def format_calendar_chronologically(self, events: List[Dict], today_formatted: str = None, group_by_currency: bool = False) -> str:
+        """
+        Format calendar events in chronological order by time.
+        
+        Args:
+            events: List of calendar events from get_calendar()
+            today_formatted: Optional formatted date string to use in the header
+            group_by_currency: Whether to group events by currency
+            
+        Returns:
+            Formatted calendar text with events in chronological order
+        """
+        if HAS_CHRONOLOGICAL_FORMATTER:
+            # Use our custom formatter if available
+            if group_by_currency:
+                return format_calendar_events_by_currency(events, today_formatted)
+            else:
+                return format_calendar_events_chronologically(events, today_formatted)
+        else:
+            # Fallback to basic formatting if formatter not available
+            if not events:
+                return "No economic events found."
+                
+            # Basic chronological formatting
+            events_sorted = sorted(events, key=lambda x: x.get("time", "00:00"))
+            
+            result = ["<b>📅 Economic Calendar</b>\n"]
+            for event in events_sorted:
+                time = event.get("time", "00:00")
+                country = event.get("country", "")
+                impact = event.get("impact", "Low")
+                title = event.get("event", "Economic Event")
+                
+                # Format impact with emoji
+                impact_emoji = "🔴" if impact == "High" else "🟠" if impact == "Medium" else "🟢"
+                
+                result.append(f"{time} - {country} - {impact_emoji} {title}")
+                
+            return "\n".join(result)
 
 # Telegram service class die de calendar service gebruikt
 class TelegramService:
