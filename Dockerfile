@@ -70,7 +70,7 @@ RUN echo '#!/bin/bash\n\
 echo "Starting Trading Bot Services..."\n\
 # First, stop any existing Telegram bot processes\n\
 echo "Stopping any existing Telegram bot processes..."\n\
-python -m trading_bot.utils.stop_existing_bots\n\
+python /app/stop_existing_bots.py\n\
 # Start the FastAPI server in the background\n\
 python -m trading_bot.server & \n\
 # Start the Telegram bot in the foreground\n\
