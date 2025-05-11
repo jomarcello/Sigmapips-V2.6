@@ -3520,14 +3520,19 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
         if context and hasattr(context, 'user_data'):
             loading_message = context.user_data.get('loading_message')
         
+        # Check if message has media (photo or animation)
+        has_media = False
+        if query and query.message:
+            has_media = bool(query.message.photo) or query.message.animation is not None
+        
         # If we don't have a loading message from context, create one
         if not loading_message:
-            # Toon loading message met GIF
+            # Show loading message with GIF
             loading_text = "Generating sentiment analysis..."
             loading_gif = "https://media.giphy.com/media/dpjUltnOPye7azvAhH/giphy.gif"
             
             try:
-                # Probeer de loading GIF te tonen
+                # Try to show the loading GIF
                 await query.edit_message_media(
                     media=InputMediaAnimation(
                         media=loading_gif,
@@ -3536,7 +3541,7 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
                 )
             except Exception as e:
                 logger.warning(f"Could not show loading GIF: {str(e)}")
-                # Fallback naar tekstupdate
+                # Fallback to text update
                 try:
                     await query.edit_message_text(text=loading_text)
                 except Exception as inner_e:
@@ -3568,8 +3573,43 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
                 InlineKeyboardButton("⬅️ Back", callback_data=back_callback)
             ]])
             
-            # Show the formatted analysis using the update_message helper
-            await self.update_message(query, formatted_analysis, reply_markup, ParseMode.HTML)
+            # If we have a media message (like the loading GIF), we need to replace it with text
+            if has_media:
+                logger.info("Replacing loading GIF with sentiment analysis text")
+                try:
+                    # First try to edit the message text directly (this will fail if it's a media message)
+                    await query.edit_message_text(
+                        text=formatted_analysis,
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.HTML
+                    )
+                except Exception as e:
+                    logger.info(f"Could not edit message text: {str(e)}")
+                    # Try to send a new text message and delete the old one
+                    try:
+                        # Send new message with the sentiment analysis
+                        new_message = await query.message.reply_text(
+                            text=formatted_analysis,
+                            reply_markup=reply_markup,
+                            parse_mode=ParseMode.HTML
+                        )
+                        # Delete the old message with the loading GIF
+                        await query.message.delete()
+                        logger.info("Successfully replaced loading GIF with new text message")
+                    except Exception as delete_error:
+                        logger.error(f"Failed to replace loading GIF: {str(delete_error)}")
+                        # Last resort: try to update the caption of the media message
+                        try:
+                            await query.edit_message_caption(
+                                caption=formatted_analysis,
+                                reply_markup=reply_markup,
+                                parse_mode=ParseMode.HTML
+                            )
+                        except Exception as caption_error:
+                            logger.error(f"Failed to update caption: {str(caption_error)}")
+            else:
+                # No media, use the standard update_message helper
+                await self.update_message(query, formatted_analysis, reply_markup, ParseMode.HTML)
             
             # Return to choose analysis state
             return CHOOSE_ANALYSIS
