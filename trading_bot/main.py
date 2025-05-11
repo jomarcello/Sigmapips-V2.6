@@ -92,7 +92,7 @@ import os
 import json
 import asyncio
 import traceback
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union, Set
 from datetime import datetime, timedelta
 import logging
 import copy
@@ -3515,6 +3515,28 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
         # Clean instrument name (without _SELL_4h etc)
         clean_instrument = instrument.split('_')[0] if '_' in instrument else instrument
         
+        # Initialize sentiment cache in context if it doesn't exist
+        if context and hasattr(context, 'user_data') and 'sentiment_cache' not in context.user_data:
+            context.user_data['sentiment_cache'] = {}
+        
+        # Check if we have a cached sentiment analysis that's less than 30 minutes old
+        cached_sentiment = None
+        if context and hasattr(context, 'user_data') and 'sentiment_cache' in context.user_data:
+            cache = context.user_data['sentiment_cache']
+            if clean_instrument in cache:
+                cached_entry = cache[clean_instrument]
+                # Check if the cached entry is less than 30 minutes old
+                if 'timestamp' in cached_entry:
+                    cache_time = datetime.strptime(cached_entry['timestamp'], "%Y-%m-%d %H:%M:%S")
+                    now = datetime.now()
+                    age_minutes = (now - cache_time).total_seconds() / 60
+                    
+                    if age_minutes < 30:  # 30 minutes cache TTL
+                        logger.info(f"Using cached sentiment analysis for {clean_instrument} (age: {age_minutes:.1f} minutes)")
+                        cached_sentiment = cached_entry
+                    else:
+                        logger.info(f"Cached sentiment analysis expired for {clean_instrument} (age: {age_minutes:.1f} minutes)")
+        
         # Check if we already have a loading message from context
         loading_message = None
         if context and hasattr(context, 'user_data'):
@@ -3525,7 +3547,60 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
         if query and query.message:
             has_media = bool(query.message.photo) or query.message.animation is not None
         
-        # If we don't have a loading message from context, create one
+        # If we have a valid cached sentiment, use it immediately without showing loading
+        if cached_sentiment:
+            # Create reply markup with back button
+            back_callback = "back_to_signal_analysis" if is_from_signal else "back_to_analysis"
+            logger.info(f"Using back button callback: {back_callback} (from_signal: {is_from_signal})")
+            reply_markup = InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Back", callback_data=back_callback)
+            ]])
+            
+            # Get the formatted text from the cache
+            formatted_analysis = cached_sentiment['text']
+            
+            # If we have a media message (like a previous loading GIF), replace it
+            if has_media:
+                logger.info("Replacing media with cached sentiment analysis text")
+                try:
+                    # First try to edit the message text directly (this will fail if it's a media message)
+                    await query.edit_message_text(
+                        text=formatted_analysis,
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.HTML
+                    )
+                except Exception as e:
+                    logger.info(f"Could not edit message text: {str(e)}")
+                    # Try to send a new text message and delete the old one
+                    try:
+                        # Send new message with the sentiment analysis
+                        new_message = await query.message.reply_text(
+                            text=formatted_analysis,
+                            reply_markup=reply_markup,
+                            parse_mode=ParseMode.HTML
+                        )
+                        # Delete the old message with the loading GIF
+                        await query.message.delete()
+                        logger.info("Successfully replaced media with cached text message")
+                    except Exception as delete_error:
+                        logger.error(f"Failed to replace media: {str(delete_error)}")
+                        # Last resort: try to update the caption of the media message
+                        try:
+                            await query.edit_message_caption(
+                                caption=formatted_analysis,
+                                reply_markup=reply_markup,
+                                parse_mode=ParseMode.HTML
+                            )
+                        except Exception as caption_error:
+                            logger.error(f"Failed to update caption: {str(caption_error)}")
+            else:
+                # No media, use the standard update_message helper
+                await self.update_message(query, formatted_analysis, reply_markup, ParseMode.HTML)
+            
+            # Return to choose analysis state
+            return CHOOSE_ANALYSIS
+        
+        # If no valid cache, show loading message and fetch new data
         if not loading_message:
             # Show loading message with GIF
             loading_text = "Generating sentiment analysis..."
@@ -3552,10 +3627,10 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
         
         try:
             # Get Telegram-formatted sentiment data using clean instrument name
-            # This uses our new rich formatting with emojis
-            formatted_analysis = await self.sentiment_service.get_telegram_sentiment(clean_instrument)
+            sentiment_result = await self.sentiment_service.get_telegram_sentiment(clean_instrument)
             
-            if not formatted_analysis:
+            # The sentiment_result is now a dictionary with text and metadata
+            if not sentiment_result or 'error' in sentiment_result:
                 # Determine which back button to use based on flow
                 back_callback = "back_to_signal_analysis" if is_from_signal else "back_to_analysis"
                 await query.message.reply_text(
@@ -3565,6 +3640,14 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
                     ]])
                 )
                 return CHOOSE_ANALYSIS
+            
+            # Store in context cache for future use
+            if context and hasattr(context, 'user_data') and 'sentiment_cache' in context.user_data:
+                context.user_data['sentiment_cache'][clean_instrument] = sentiment_result
+                logger.info(f"Cached sentiment analysis for {clean_instrument}")
+            
+            # Get the formatted text from the result
+            formatted_analysis = sentiment_result['text']
             
             # Create reply markup with back button - use correct back button based on flow
             back_callback = "back_to_signal_analysis" if is_from_signal else "back_to_analysis"

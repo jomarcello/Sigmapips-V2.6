@@ -13,6 +13,7 @@ import openai
 from openai import AsyncOpenAI
 from trading_bot.config import AI_SERVICES_ENABLED
 import re
+import time
 
 class PerformanceMetrics:
     """Simple performance metrics tracker"""
@@ -80,6 +81,7 @@ class MarketSentimentService:
         self.persistent_cache = persistent_cache
         self.cache_file = cache_file or os.path.join(str(Path.home()), ".market_sentiment_cache")
         self.sentiment_cache = {}
+        self._load_cache()  # Load cache on initialization
         
         # Initialize simple metrics tracking
         self.metrics = {}
@@ -115,17 +117,32 @@ class MarketSentimentService:
                 if not self.openai_api_key:
                     self.logger.error("No OpenAI API key found. Make sure OPENAI_API_KEY is set in environment variables.")
                 return await self._construct_default_analysis(market)
-                
-            # TEMPORARILY DISABLE CACHE TO DEBUG
-            self.logger.info(f"Bypassing cache for {market} to debug API issues")
+            
+            # Check cache first
+            cache_key = f"{market}_{market_type}_sentiment"
+            current_time = time.time()
+            
+            if cache_key in self.sentiment_cache:
+                cache_entry = self.sentiment_cache[cache_key]
+                # Check if entry has timestamp and is still valid
+                if isinstance(cache_entry, dict) and '_timestamp' in cache_entry:
+                    age = current_time - cache_entry['_timestamp']
+                    if age < self.cache_ttl:
+                        self.logger.info(f"Using cached sentiment data for {market} (age: {int(age)} seconds)")
+                        return cache_entry
+                    else:
+                        self.logger.info(f"Cached sentiment data for {market} expired (age: {int(age)} seconds)")
+            
+            # Cache miss or expired, fetch new data
+            self.logger.info(f"Fetching fresh sentiment data for {market}")
             analysis_data = await self._fetch_sentiment_analysis(market, market_type)
             
-            # Add a marker to verify this is real API data
+            # Add metadata to the response
             if isinstance(analysis_data, dict):
                 analysis_data['_source'] = 'openai_api'
+                analysis_data['_timestamp'] = current_time
                 
             # Store in cache
-            cache_key = f"{market}_{market_type}_sentiment"
             self.sentiment_cache[cache_key] = analysis_data
             if self.persistent_cache:
                 self._save_cache()
@@ -442,6 +459,9 @@ IMPORTANT: Return ONLY valid JSON with NO additional text.'''
             sentiment_data = await self.get_sentiment(instrument)
             self.logger.info(f"Retrieved sentiment data for {instrument}, formatting for Telegram")
             
+            # Add a timestamp to the formatted result for caching in the Telegram service
+            formatted_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
             # Log the data we're using for formatting
             breakdown = sentiment_data.get('percentage_breakdown', {})
             bullish_pct = breakdown.get('bullish', 50)
@@ -471,11 +491,26 @@ IMPORTANT: Return ONLY valid JSON with NO additional text.'''
             # Ensure the text isn't too long for Telegram
             formatted_text = self._truncate_for_telegram(formatted_text)
             
+            # Create a result object with both the text and metadata
+            result = {
+                "text": formatted_text,
+                "timestamp": formatted_timestamp,
+                "instrument": instrument,
+                "bullish": bullish_pct,
+                "bearish": bearish_pct,
+                "neutral": neutral_pct
+            }
+            
             self.logger.info(f"Successfully formatted sentiment for {instrument}")
-            return formatted_text
+            return result
         except Exception as e:
             self.logger.error(f"Error in get_telegram_sentiment for {instrument}: {str(e)}")
-            return f"<b>🎯 {instrument} Market Analysis</b>\n\n⚠️ Error retrieving sentiment data: {str(e)}"
+            return {
+                "text": f"<b>🎯 {instrument} Market Analysis</b>\n\n⚠️ Error retrieving sentiment data: {str(e)}",
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "instrument": instrument,
+                "error": True
+            }
             
     def _truncate_for_telegram(self, text):
         """
@@ -557,6 +592,19 @@ IMPORTANT: Return ONLY valid JSON with NO additional text.'''
                     json.dump(self.sentiment_cache, f)
             except Exception as e:
                 self.logger.error(f"Failed to save cache: {str(e)}")
+
+    def _load_cache(self) -> None:
+        """
+        Load the cache from file if it exists
+        """
+        if self.persistent_cache and os.path.exists(self.cache_file):
+            try:
+                with open(self.cache_file, 'r') as f:
+                    self.sentiment_cache = json.load(f)
+                    self.logger.info(f"Loaded {len(self.sentiment_cache)} entries from cache file")
+            except Exception as e:
+                self.logger.error(f"Failed to load cache: {str(e)}")
+                self.sentiment_cache = {}
 
     def __repr__(self) -> str:
         return f"MarketSentimentService(cached_data_count={len(self.sentiment_cache)}, fast_mode={self.fast_mode})"
