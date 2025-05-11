@@ -12,6 +12,7 @@ import traceback
 import openai
 from openai import AsyncOpenAI
 from trading_bot.config import AI_SERVICES_ENABLED
+import re
 
 class PerformanceMetrics:
     """Simple performance metrics tracker"""
@@ -156,39 +157,38 @@ class MarketSentimentService:
                 messages=[
                     {
                         'role': 'system',
-                        'content': f'''You are an expert financial market analyst. Your task is to provide a concise {market} sentiment analysis:
+                        'content': f'''You are an expert financial market analyst. Your task is to provide a concise {market} sentiment analysis in STRICT JSON format.
 
-1. SENTIMENT CALCULATION:
-   - Provide a clear overall sentiment: bullish, bearish, or neutral
-   - Include percentage breakdown that sums to 100%
-   - Use a confidence score from 0.0-1.0
+IMPORTANT: Your response MUST be a valid, parseable JSON object with NO additional text or formatting.
 
-2. KEY DRIVERS (3-5 only):
-   - List the most important factors affecting the market
-   - Each with a brief description (1-2 sentences maximum)
-   - Assign an impact score (1-10)
+Required fields:
+1. "overall_sentiment": Must be "bullish", "bearish", or "neutral" only
+2. "percentage_breakdown": Object with "bullish", "bearish", and "neutral" percentages (must sum to 100%)
+3. "key_drivers": Array of 3-5 objects, each with "factor" and "description" fields
+4. "market_summary": Brief overview of current market conditions (1-2 sentences)
 
-3. MARKET SUMMARY:
-   - Brief overview of current market conditions (2-3 sentences)
-   - Focus only on the most relevant information
-
-4. OUTPUT FORMAT (STRICT VALID JSON):
+Example of VALID response format:
 {{
-  "overall_sentiment": "bullish/neutral/bearish",
+  "overall_sentiment": "neutral",
   "percentage_breakdown": {{
-    "bullish": 0-100,
-    "bearish": 0-100,
-    "neutral": 0-100
+    "bullish": 35,
+    "bearish": 35,
+    "neutral": 30
   }},
   "key_drivers": [
     {{
-      "factor": "Brief name",
-      "description": "Short description",
-      "importance": "high/medium/low"
+      "factor": "Interest Rate Decisions",
+      "description": "Central bank policies affecting currency strength"
+    }},
+    {{
+      "factor": "Economic Indicators",
+      "description": "Recent data showing mixed economic signals"
     }}
   ],
-  "market_summary": "Brief market summary"
-}}'''
+  "market_summary": "Brief market overview in 1-2 sentences."
+}}
+
+DO NOT include any explanations, markdown formatting, or text outside the JSON structure.'''
                     },
                     {
                         'role': 'user',
@@ -196,13 +196,14 @@ class MarketSentimentService:
 1. Overall sentiment (bullish/bearish/neutral)
 2. Percentage breakdown (must sum to 100%)
 3. 3-5 key drivers with brief descriptions
-4. Short market summary (2-3 sentences maximum)
-5. Return ONLY valid JSON'''
+4. Short market summary (1-2 sentences maximum)
+
+IMPORTANT: Return ONLY valid JSON with NO additional text.'''
                     }
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.1,  # More deterministic
-                max_tokens=1000   # Reduced token count for more concise responses
+                max_tokens=800    # Reduced token count for more concise responses
             )
 
             if response.choices[0].message.content:
@@ -264,8 +265,7 @@ class MarketSentimentService:
                         result['key_drivers'] = [
                             {
                                 "factor": "Market Analysis",
-                                "description": "Based on recent market data",
-                                "importance": "medium"
+                                "description": "Based on recent market data"
                             }
                         ]
                     
@@ -304,8 +304,90 @@ class MarketSentimentService:
         
         if json_start >= 0 and json_end >= 0:
             response_text = response_text[json_start:json_end+1]
+        
+        # Try to fix common JSON structure issues
+        try:
+            # First attempt to parse as is
+            try:
+                json.loads(response_text)
+                return response_text  # If it parses correctly, return as is
+            except json.JSONDecodeError:
+                pass
             
-        return response_text
+            # If that fails, try more aggressive cleaning
+            
+            # Remove newlines and extra whitespace
+            response_text = re.sub(r'\s+', ' ', response_text)
+            
+            # Ensure proper nesting of objects
+            open_braces = response_text.count('{')
+            close_braces = response_text.count('}')
+            
+            # Add missing closing braces
+            if open_braces > close_braces:
+                response_text += '}' * (open_braces - close_braces)
+            
+            # Try to reconstruct a valid JSON object
+            if '"overall_sentiment"' in response_text and '"percentage_breakdown"' in response_text:
+                # Extract the key fields we need
+                sentiment_match = re.search(r'"overall_sentiment"\s*:\s*"([^"]+)"', response_text)
+                overall_sentiment = sentiment_match.group(1) if sentiment_match else "neutral"
+                
+                # Extract percentage breakdown
+                bullish_match = re.search(r'"bullish"\s*:\s*(\d+)', response_text)
+                bearish_match = re.search(r'"bearish"\s*:\s*(\d+)', response_text)
+                neutral_match = re.search(r'"neutral"\s*:\s*(\d+)', response_text)
+                
+                bullish = int(bullish_match.group(1)) if bullish_match else 33
+                bearish = int(bearish_match.group(1)) if bearish_match else 33
+                neutral = int(neutral_match.group(1)) if neutral_match else 34
+                
+                # Extract market summary
+                summary_match = re.search(r'"market_summary"\s*:\s*"([^"]+)"', response_text)
+                market_summary = summary_match.group(1) if summary_match else "No summary available."
+                
+                # Extract key drivers - this is more complex, try to get what we can
+                key_drivers = []
+                factor_matches = re.finditer(r'"factor"\s*:\s*"([^"]+)"', response_text)
+                desc_matches = re.finditer(r'"description"\s*:\s*"([^"]+)"', response_text)
+                
+                factors = [m.group(1) for m in factor_matches]
+                descriptions = [m.group(1) for m in desc_matches]
+                
+                # Match factors with descriptions as best we can
+                for i in range(min(len(factors), len(descriptions), 5)):  # Limit to 5 drivers
+                    key_drivers.append({
+                        "factor": factors[i],
+                        "description": descriptions[i]
+                    })
+                
+                # If we couldn't extract any key drivers, add a default one
+                if not key_drivers:
+                    key_drivers = [{
+                        "factor": "Market Analysis",
+                        "description": "Based on recent market data and trends."
+                    }]
+                
+                # Construct a clean JSON object
+                clean_json = {
+                    "overall_sentiment": overall_sentiment,
+                    "percentage_breakdown": {
+                        "bullish": bullish,
+                        "bearish": bearish,
+                        "neutral": neutral
+                    },
+                    "key_drivers": key_drivers,
+                    "market_summary": market_summary
+                }
+                
+                return json.dumps(clean_json)
+            
+            return response_text
+            
+        except Exception as e:
+            self.logger.error(f"Error cleaning JSON: {str(e)}")
+            # Return the original text if cleaning fails
+            return response_text
         
     async def _construct_default_analysis(self, market: str) -> Dict:
         """
@@ -366,6 +448,13 @@ class MarketSentimentService:
             bearish_pct = breakdown.get('bearish', 30)
             neutral_pct = breakdown.get('neutral', 20)
             
+            # Get the overall sentiment and market summary
+            overall_sentiment = sentiment_data.get('overall_sentiment', 'neutral')
+            market_summary = sentiment_data.get('market_summary', '')
+            
+            # Get key drivers
+            key_drivers = sentiment_data.get('key_drivers', [])
+            
             self.logger.info(f"Using sentiment percentages for {instrument}: bullish={bullish_pct}%, bearish={bearish_pct}%, neutral={neutral_pct}%")
             
             # Format the sentiment data for Telegram
@@ -373,7 +462,10 @@ class MarketSentimentService:
                 instrument, 
                 bullish_pct, 
                 bearish_pct,
-                neutral_pct
+                neutral_pct,
+                overall_sentiment,
+                key_drivers,
+                market_summary
             )
             
             # Ensure the text isn't too long for Telegram
@@ -469,7 +561,8 @@ class MarketSentimentService:
     def __repr__(self) -> str:
         return f"MarketSentimentService(cached_data_count={len(self.sentiment_cache)}, fast_mode={self.fast_mode})"
         
-    def _format_compact_sentiment_text(self, instrument, bullish_pct, bearish_pct, neutral_pct=None):
+    def _format_compact_sentiment_text(self, instrument, bullish_pct, bearish_pct, neutral_pct=None, 
+                                       overall_sentiment='neutral', key_drivers=None, market_summary=None):
         """
         Format sentiment in compact text format suitable for Telegram
         """
@@ -478,27 +571,11 @@ class MarketSentimentService:
             neutral_pct = 100 - bullish_pct - bearish_pct
             
         # Determine overall sentiment with more nuanced grading
-        if bullish_pct - bearish_pct > 20:
+        if overall_sentiment.lower() == 'bullish':
             sentiment = "BULLISH"
             sentiment_emoji = "📈"
             sentiment_color = "🟢"
-        elif bullish_pct - bearish_pct > 10:
-            sentiment = "BULLISH"
-            sentiment_emoji = "📈"
-            sentiment_color = "🟢"
-        elif bullish_pct - bearish_pct > 5:
-            sentiment = "BULLISH"
-            sentiment_emoji = "📈"
-            sentiment_color = "🟢"
-        elif bearish_pct - bullish_pct > 20:
-            sentiment = "BEARISH"
-            sentiment_emoji = "📉"
-            sentiment_color = "🔴"
-        elif bearish_pct - bullish_pct > 10:
-            sentiment = "BEARISH"
-            sentiment_emoji = "📉"
-            sentiment_color = "🔴"
-        elif bearish_pct - bullish_pct > 5:
+        elif overall_sentiment.lower() == 'bearish':
             sentiment = "BEARISH"
             sentiment_emoji = "📉"
             sentiment_color = "🔴"
@@ -507,97 +584,64 @@ class MarketSentimentService:
             sentiment_emoji = "⚖️"
             sentiment_color = "⚪️"
         
-        # Generate key drivers based on sentiment
-        key_drivers = []
+        # Use provided key drivers or generate default ones
+        if not key_drivers:
+            key_drivers = []
+            
+            # Add default key drivers based on sentiment
+            if sentiment == "BULLISH":
+                key_drivers = [
+                    {
+                        "factor": "UK GDP Growth",
+                        "description": "Recent GDP figures exceeded expectations at 0.6% quarter-on-quarter, signaling economic resilience."
+                    },
+                    {
+                        "factor": "US Dollar Weakness",
+                        "description": "The USD has weakened broadly against major currencies as markets price in more aggressive Fed rate cuts."
+                    }
+                ]
+            elif sentiment == "BEARISH":
+                key_drivers = [
+                    {
+                        "factor": "US Inflation Data",
+                        "description": "Recent US CPI figures came in higher than expected at 3.2%, reducing expectations for aggressive Fed rate cuts."
+                    },
+                    {
+                        "factor": "UK Economic Slowdown",
+                        "description": "UK GDP contracted by 0.2% in the latest reading, raising concerns about economic resilience."
+                    }
+                ]
+            else:
+                key_drivers = [
+                    {
+                        "factor": "Mixed Economic Data",
+                        "description": "Recent economic indicators from both the UK and US have shown mixed results, creating a balanced outlook."
+                    },
+                    {
+                        "factor": "Central Bank Uncertainty",
+                        "description": "Markets are uncertain about the timing of rate cuts from both the Fed and BOE, leading to range-bound trading."
+                    }
+                ]
         
-        # Add 5 key market drivers with varying importance levels (but without emojis)
-        if sentiment == "BULLISH":
-            key_drivers = [
-                {
-                    "factor": "UK GDP Growth",
-                    "description": "Recent GDP figures exceeded expectations at 0.6% quarter-on-quarter, signaling economic resilience."
-                },
-                {
-                    "factor": "US Dollar Weakness",
-                    "description": "The USD has weakened broadly against major currencies as markets price in more aggressive Fed rate cuts."
-                },
-                {
-                    "factor": "Bank of England Policy",
-                    "description": "Recent comments from BoE officials suggest a more cautious approach to rate cuts than expected."
-                },
-                {
-                    "factor": "Improved Risk Sentiment",
-                    "description": "Global risk appetite has improved, benefiting risk-sensitive currencies like GBP."
-                },
-                {
-                    "factor": "Technical Breakout",
-                    "description": "GBP/USD has broken above key resistance levels, triggering stop losses and attracting momentum."
-                }
-            ]
-        elif sentiment == "BEARISH":
-            key_drivers = [
-                {
-                    "factor": "US Inflation Data",
-                    "description": "Recent US CPI figures came in higher than expected at 3.2%, reducing expectations for aggressive Fed rate cuts."
-                },
-                {
-                    "factor": "UK Economic Slowdown",
-                    "description": "UK GDP contracted by 0.2% in the latest reading, raising concerns about economic resilience."
-                },
-                {
-                    "factor": "Risk Aversion",
-                    "description": "Global markets have shifted to risk-off sentiment, strengthening the USD against risk-sensitive currencies."
-                },
-                {
-                    "factor": "Technical Breakdown",
-                    "description": "GBP/USD has broken below key support levels, triggering stop losses and accelerating selling pressure."
-                },
-                {
-                    "factor": "BOE Dovish Signals",
-                    "description": "Bank of England officials have signaled a more dovish stance on monetary policy, weighing on sterling."
-                }
-            ]
-        else:
-            key_drivers = [
-                {
-                    "factor": "Mixed Economic Data",
-                    "description": "Recent economic indicators from both the UK and US have shown mixed results, creating a balanced outlook."
-                },
-                {
-                    "factor": "Central Bank Uncertainty",
-                    "description": "Markets are uncertain about the timing of rate cuts from both the Fed and BOE, leading to range-bound trading."
-                },
-                {
-                    "factor": "Technical Consolidation",
-                    "description": "Price action has been contained within a narrow range, with neither bulls nor bears gaining clear control."
-                },
-                {
-                    "factor": "Balanced Positioning",
-                    "description": "Institutional positioning data shows a relatively balanced market with no clear directional bias."
-                },
-                {
-                    "factor": "Awaiting Catalysts",
-                    "description": "Traders are awaiting key economic releases before committing to directional positions."
-                }
-            ]
-        
-        # Create market summary based on sentiment
-        if sentiment == "BULLISH":
-            market_summary = f"{instrument} has shown strong bullish momentum in recent sessions, driven by better-than-expected UK economic data and a general weakening of the US dollar. The pair has broken above key resistance levels, suggesting continued upward pressure."
-        elif sentiment == "BEARISH":
-            market_summary = f"{instrument} has displayed significant bearish momentum recently, pressured by disappointing UK economic data and renewed USD strength. The pair has broken below key support levels, indicating further downside potential."
-        else:
-            market_summary = f"{instrument} has been trading in a consolidation pattern, with price action contained within recent ranges. Mixed economic signals from both the UK and US have created a balanced market environment."
+        # Use provided market summary or generate default one
+        if not market_summary:
+            if sentiment == "BULLISH":
+                market_summary = f"{instrument} has shown strong bullish momentum in recent sessions, driven by better-than-expected UK economic data and a general weakening of the US dollar."
+            elif sentiment == "BEARISH":
+                market_summary = f"{instrument} has displayed significant bearish momentum recently, pressured by disappointing UK economic data and renewed USD strength."
+            else:
+                market_summary = f"{instrument} has been trading in a consolidation pattern, with price action contained within recent ranges. Mixed economic signals have created a balanced market environment."
         
         # Add recent news section - make it shorter
         recent_news = "UK Inflation: 2.4% (below expectations). US Retail Sales: +0.2% m/m (disappointing). BoE's Bailey: 'UK Economy Showing Resilience'."
         
         # Format key drivers without emojis
         formatted_key_drivers = ""
-        for driver in key_drivers:
-            factor = driver.get("factor")
-            description = driver.get("description")
-            formatted_key_drivers += f"<b>{factor}</b>: {description}\n\n"
+        for driver in key_drivers[:5]:  # Limit to 5 key drivers
+            factor = driver.get("factor", "")
+            description = driver.get("description", "")
+            if factor and description:
+                formatted_key_drivers += f"<b>{factor}</b>: {description}\n\n"
             
         # Create formatted text with HTML formatting - more concise version
         formatted_text = f"""<b>🎯 {instrument.upper()} MARKET SENTIMENT {sentiment_emoji}</b>
