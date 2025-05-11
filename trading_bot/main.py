@@ -683,8 +683,9 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()  # Changed from DeepSeek to OpenAI
 
-# No longer using Tavily
-TAVILY_API_KEY = ""
+# Only using OpenAI's o4-mini now
+# No Tavily API key needed anymore
+logger.info("Using only OpenAI o4-mini for Market Sentiment service")
 
 # Log OpenAI API key (partially masked)
 if OPENAI_API_KEY:
@@ -702,7 +703,7 @@ else:
 # Set environment variables for the API keys with sanitization
 os.environ["PERPLEXITY_API_KEY"] = PERPLEXITY_API_KEY
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY  # Changed from DeepSeek to OpenAI
-os.environ["TAVILY_API_KEY"] = ""  # Empty string as we no longer use Tavily
+# No Tavily environment needed
 
 class TelegramService:
     def __init__(self, db: Database, stripe_service=None, bot_token: Optional[str] = None, proxy_url: Optional[str] = None, lazy_init: bool = False):
@@ -3456,10 +3457,11 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
                         logger.error(f"Could not update loading message: {str(inner_e2)}")
         
         try:
-            # Get sentiment data using clean instrument name - property will lazily initialize the service
-            sentiment_data = await self.sentiment_service.get_sentiment(clean_instrument)
+            # Get Telegram-formatted sentiment data using clean instrument name
+            # This uses our new rich formatting with emojis
+            formatted_analysis = await self.sentiment_service.get_telegram_sentiment(clean_instrument)
             
-            if not sentiment_data:
+            if not formatted_analysis:
                 # Determine which back button to use based on flow
                 back_callback = "back_to_signal_analysis" if is_from_signal else "back_to_analysis"
                 await query.message.reply_text(
@@ -3470,122 +3472,6 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
                 )
                 return CHOOSE_ANALYSIS
             
-            # Extract data
-            bullish = sentiment_data.get('bullish', 50)
-            bearish = sentiment_data.get('bearish', 30)
-            neutral = sentiment_data.get('neutral', 20)
-            
-            # Determine sentiment
-            if bullish > bearish + neutral:
-                overall = "Bullish"
-                emoji = "📈"
-            elif bearish > bullish + neutral:
-                overall = "Bearish"
-                emoji = "📉"
-            else:
-                overall = "Neutral"
-                emoji = "⚖️"
-            
-            # Get analysis text
-            analysis_text = ""
-            if isinstance(sentiment_data.get('analysis'), str):
-                analysis_text = sentiment_data['analysis']
-            
-            # Prepare the message format without relying on regex
-            # This will help avoid HTML parsing errors
-            title = f"<b>🎯 {clean_instrument} Market Analysis</b>"
-            overall_sentiment = f"<b>Overall Sentiment:</b> {overall} {emoji}"
-            
-            # Check if the provided analysis already has a title
-            if analysis_text and "<b>🎯" in analysis_text and "Market Analysis</b>" in analysis_text:
-                # Extract the title from the analysis
-                title_start = analysis_text.find("<b>🎯")
-                title_end = analysis_text.find("</b>", title_start) + 4
-                title = analysis_text[title_start:title_end]
-                
-                # Remove the title from the analysis
-                analysis_text = analysis_text[:title_start] + analysis_text[title_end:]
-                analysis_text = analysis_text.strip()
-            
-            # Clean up the analysis text
-            analysis_text = analysis_text.replace("</b><b>", "</b> <b>")  # Fix malformed tags
-            
-            # Zorgen dat ALLE kopjes in de analyse direct in bold staan
-            headers = [
-                "Market Sentiment Breakdown:",
-                "Market Direction:",
-                "Latest News & Events:",
-                "Risk Factors:",
-                "Conclusion:",
-                "Technical Outlook:",
-                "Fundamental Analysis:",
-                "Support & Resistance:",
-                "Sentiment Breakdown:"
-            ]
-            
-            # Eerst verwijderen we bestaande bold tags bij headers om dubbele tags te voorkomen
-            for header in headers:
-                if f"<b>{header}</b>" in analysis_text:
-                    # Als header al bold is, niet opnieuw toepassen
-                    continue
-                
-                # Vervang normale tekst door bold tekst, met regex om exacte match te garanderen
-                pattern = re.compile(r'(\n|^)(' + re.escape(header) + r')')
-                analysis_text = pattern.sub(r'\1<b>\2</b>', analysis_text)
-            
-            # Verwijder extra witruimte tussen secties
-            analysis_text = re.sub(r'\n{3,}', '\n\n', analysis_text)  # Replace 3+ newlines with 2
-            analysis_text = re.sub(r'^\n+', '', analysis_text)  # Remove leading newlines
-            
-            # Verbeter de layout van het bericht
-            # Specifiek verwijder witruimte tussen Overall Sentiment en Market Sentiment Breakdown
-            full_message = f"{title}\n\n{overall_sentiment}"
-            
-            # If there's analysis text, add it with compact formatting
-            if analysis_text:
-                found_header = False
-                
-                # Controleer specifiek op Market Sentiment Breakdown header
-                if "<b>Market Sentiment Breakdown:</b>" in analysis_text:
-                    parts = analysis_text.split("<b>Market Sentiment Breakdown:</b>", 1)
-                    full_message += f"\n\n<b>Market Sentiment Breakdown:</b>{parts[1]}"
-                    found_header = True
-                elif "Market Sentiment Breakdown:" in analysis_text:
-                    # Als de header er wel is maar niet bold, fix het
-                    parts = analysis_text.split("Market Sentiment Breakdown:", 1)
-                    full_message += f"\n\n<b>Market Sentiment Breakdown:</b>{parts[1]}"
-                    found_header = True
-                
-                # Als de Market Sentiment header niet gevonden is, zoek andere headers
-                if not found_header:
-                    for header in headers:
-                        header_bold = f"<b>{header}</b>"
-                        if header_bold in analysis_text:
-                            parts = analysis_text.split(header_bold, 1)
-                            full_message += f"\n\n{header_bold}{parts[1]}"
-                            found_header = True
-                            break
-                        elif header in analysis_text:
-                            # Als de header er wel is maar niet bold, fix het
-                            parts = analysis_text.split(header, 1)
-                            full_message += f"\n\n<b>{header}</b>{parts[1]}"
-                            found_header = True
-                            break
-                
-                # Als geen headers gevonden, voeg de volledige analyse toe
-                if not found_header:
-                    full_message += f"\n\n{analysis_text}"
-            else:
-                # No analysis text, add a manual breakdown without extra spacing
-                full_message += f"""
-<b>Market Sentiment Breakdown:</b>
-🟢 Bullish: {bullish}%
-🔴 Bearish: {bearish}%
-⚪️ Neutral: {neutral}%"""
-
-            # Verwijder alle dubbele newlines om nog meer witruimte te voorkomen
-            full_message = re.sub(r'\n{3,}', '\n\n', full_message)
-            
             # Create reply markup with back button - use correct back button based on flow
             back_callback = "back_to_signal_analysis" if is_from_signal else "back_to_analysis"
             logger.info(f"Using back button callback: {back_callback} (from_signal: {is_from_signal})")
@@ -3593,92 +3479,37 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
                 InlineKeyboardButton("⬅️ Back", callback_data=back_callback)
             ]])
             
-            # Validate HTML formatting
-            try:
-                # Test if HTML parsing works by creating a re-sanitized version
-                from html.parser import HTMLParser
-                
-                class HTMLValidator(HTMLParser):
-                    def __init__(self):
-                        super().__init__()
-                        self.errors = []
-                        self.open_tags = []
-                    
-                    def handle_starttag(self, tag, attrs):
-                        self.open_tags.append(tag)
-                    
-                    def handle_endtag(self, tag):
-                        if self.open_tags and self.open_tags[-1] == tag:
-                            self.open_tags.pop()
-                        else:
-                            self.errors.append(f"Unexpected end tag: {tag}")
-                
-                validator = HTMLValidator()
-                validator.feed(full_message)
-                
-                if validator.errors:
-                    logger.warning(f"HTML validation errors: {validator.errors}")
-                    # Fallback to plaintext if HTML is invalid
-                    full_message = re.sub(r'<[^>]+>', '', full_message)
-            except Exception as html_error:
-                logger.warning(f"HTML validation failed: {str(html_error)}")
+            # Show the formatted analysis using the update_message helper
+            await self.update_message(query, formatted_analysis, reply_markup, ParseMode.HTML)
             
-            # Send a completely new message to avoid issues with previous message
-            try:
-                # First try to edit the existing message when possible
-                try:
-                    await query.edit_message_text(
-                        text=full_message,
-                        parse_mode=ParseMode.HTML,
-                        reply_markup=reply_markup
-                    )
-                    logger.info("Successfully edited existing message with sentiment analysis")
-                except Exception as edit_error:
-                    logger.warning(f"Could not edit message, will create new one: {str(edit_error)}")
-                    
-                    # If editing fails, delete and create new message
-                    await query.message.delete()
-                    await context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text=full_message,
-                        parse_mode=ParseMode.HTML,
-                        reply_markup=reply_markup
-                    )
-                    logger.info("Created new message with sentiment analysis after deleting old one")
-            except Exception as msg_error:
-                logger.error(f"Error sending message: {str(msg_error)}")
-                # Try without HTML parsing if that's the issue
-                if "Can't parse entities" in str(msg_error):
-                    try:
-                        # Try to edit first
-                        await query.edit_message_text(
-                            text=re.sub(r'<[^>]+>', '', full_message),  # Strip HTML tags
-                            reply_markup=reply_markup
-                        )
-                    except Exception:
-                        # If editing fails, send new message
-                        await context.bot.send_message(
-                            chat_id=update.effective_chat.id,
-                            text=re.sub(r'<[^>]+>', '', full_message),  # Strip HTML tags
-                            reply_markup=reply_markup
-                        )
-            
+            # Return to choose analysis state
             return CHOOSE_ANALYSIS
-            
         except Exception as e:
-            logger.error(f"Error in sentiment analysis: {str(e)}")
-            # Determine which back button to use based on flow
+            logger.error(f"Error in show_sentiment_analysis: {str(e)}", exc_info=True)
             back_callback = "back_to_signal_analysis" if is_from_signal else "back_to_analysis"
-            error_text = "Error generating sentiment analysis. Please try again."
+            
+            # Show error message with back button
+            error_text = f"<b>⚠️ Error</b>\n\nUnable to retrieve sentiment analysis for {clean_instrument}.\n\nPlease try again later."
+            
             try:
                 await query.edit_message_text(
                     text=error_text,
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton("⬅️ Back", callback_data=back_callback)
-                    ]])
+                    ]]),
+                    parse_mode=ParseMode.HTML
                 )
-            except Exception as text_error:
-                logger.error(f"Could not update error message: {str(text_error)}")
+            except Exception as edit_error:
+                try:
+                    await query.edit_message_caption(
+                        caption=error_text,
+                        reply_markup=InlineKeyboardMarkup([[
+                            InlineKeyboardButton("⬅️ Back", callback_data=back_callback)
+                        ]]),
+                        parse_mode=ParseMode.HTML
+                    )
+                except Exception as caption_error:
+                    logger.error(f"Failed to update error message: {str(caption_error)}")
             
             return CHOOSE_ANALYSIS
 

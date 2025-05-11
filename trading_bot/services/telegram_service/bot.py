@@ -4512,75 +4512,45 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
                 self.sentiment_service = MarketSentimentService(fast_mode=True)
                 sentiment_service = self.sentiment_service
             
-            # First check if we have cached data for this instrument
-            if market_type:
-                cached_data = sentiment_service._get_from_market_specific_cache(instrument, market_type)
-            else:
-                cached_data = sentiment_service._get_from_cache(instrument)
-                
-            if cached_data:
-                # Use cached data
-                if 'sentiment_text' in cached_data:
-                    logger.info(f"Using cached sentiment analysis for {instrument}")
-                    return cached_data['sentiment_text']
-                elif 'analysis' in cached_data:
-                    logger.info(f"Using cached analysis for {instrument}")
-                    return cached_data['analysis']
-            
-            # If no cached data, get fast sentiment first (this is instantaneous)
-            fast_response = sentiment_service._get_quick_local_sentiment(instrument)
-            if fast_response and 'sentiment_text' in fast_response:
-                # Start a background fetch to update the cache for next time
-                asyncio.create_task(sentiment_service._fetch_background_sentiment(instrument, market_type))
-                
-                # Return fast response immediately to avoid any delay
-                logger.info(f"Using fast sentiment response for {instrument}")
-                
-                # Cache the fast response
-                sentiment_service._add_to_cache(instrument, fast_response)
-                
-                return fast_response['sentiment_text']
-            
-            # If for some reason we can't get fast sentiment, try normal way with timeout
-            logger.info(f"Using standard flow with timeout for {instrument}")
-            
-            # Create a task with timeout
-            sentiment_task = asyncio.create_task(sentiment_service.get_market_sentiment_text(instrument))
-            
-            # Wait for maximum timeout_seconds (reduced from 45 to 15s)
+            # Use our new Telegram-formatted sentiment method
             try:
-                sentiment_text = await asyncio.wait_for(sentiment_task, timeout_seconds)
-                logger.info(f"Got sentiment analysis for {instrument}")
-                return sentiment_text
-            except asyncio.TimeoutError:
-                # Cancel task (will continue running in background)
-                sentiment_task.cancel()
+                # First try the Telegram-formatted version
+                formatted_text = await sentiment_service.get_telegram_sentiment(instrument)
+                if formatted_text:
+                    return formatted_text
+            except Exception as format_error:
+                logger.warning(f"Error getting Telegram formatted sentiment: {str(format_error)}")
+                # Fall back to regular sentiment method if the Telegram formatting fails
                 
-                logger.warning(f"Sentiment analysis timed out after {timeout_seconds}s")
+            # Legacy fallback
+            sentiment_data = await sentiment_service.get_market_sentiment(instrument)
+            
+            if not sentiment_data or 'error' in sentiment_data:
+                return f"<b>⚠️ Sentiment Analysis Error</b>\n\nUnable to retrieve sentiment data for {instrument}. Please try again later or check another instrument."
                 
-                # At this point we hit a timeout, so use the fast sentiment as fallback
-                fast_fallback = sentiment_service._get_quick_local_sentiment(instrument)
-                if fast_fallback and 'sentiment_text' in fast_fallback:
-                    logger.info(f"Using fast fallback sentiment after timeout for {instrument}")
-                    return fast_fallback['sentiment_text']
+            if isinstance(sentiment_data, str):
+                # If we got a string directly, return it
+                return sentiment_data
                 
-                # If even that fails, return a clear timeout error message
-                return f"""<b>⚠️ Sentiment Analysis Timeout</b>
-
-The sentiment analysis for {instrument} is taking longer than expected.
-
-Please try again in a few moments. Our systems are working to collect the latest market data and provide you with an accurate analysis.
-
-<i>This is not using any fallback or mock data - we're working to get you real market sentiment.</i>"""
+            if 'analysis' in sentiment_data and sentiment_data['analysis']:
+                return sentiment_data['analysis']
                 
+            # Format a basic response if no analysis is available
+            bullish = sentiment_data.get('bullish_percentage', 50)
+            bearish = sentiment_data.get('bearish_percentage', 30)
+            neutral = 100 - bullish - bearish
+            
+            # Use the compact formatter as fallback
+            return sentiment_service._format_compact_sentiment_text(instrument, bullish, bearish, neutral)
+            
         except Exception as e:
-            logger.error(f"Error getting sentiment: {str(e)}", exc_info=True)
-            return f"""<b>⚠️ Sentiment Analysis Error</b>
+            logger.error(f"Error in _get_sentiment_with_timeout: {str(e)}")
+            error_message = f"""<b>⚠️ {instrument} Sentiment Analysis Error</b>
 
-Could not retrieve sentiment data for {instrument}.
-Please try again later.
+Unable to retrieve sentiment data at this time. Please try again later.
 
 Error details: {str(e)[:100]}"""
+            return error_message
 
     async def show_calendar_analysis(self, update: Update, context=None, instrument=None) -> int:
         """Show economic calendar events for a specific instrument"""
