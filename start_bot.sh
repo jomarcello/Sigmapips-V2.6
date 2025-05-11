@@ -18,71 +18,62 @@ fi
 
 # Controleer of Python is geïnstalleerd
 if ! command -v python3 &> /dev/null; then
-    echo "ERROR: Python 3 is niet geïnstalleerd. Installeer Python 3 en probeer het opnieuw."
+    echo "Python 3 is niet geïnstalleerd! Installeer Python 3 om de bot te gebruiken."
     exit 1
 fi
 
-# Controleer Python versie op een eenvoudigere manier
-PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-PYTHON_MAJOR=$(python3 -c 'import sys; print(sys.version_info.major)')
-PYTHON_MINOR=$(python3 -c 'import sys; print(sys.version_info.minor)')
+# Zoek naar geïnstalleerde Python versies
+PYTHON_COMMAND="python3"
 
-# Directe vergelijking met integers (eenvoudiger en betrouwbaarder)
-if [ $PYTHON_MAJOR -lt 3 ]; then
-    echo "ERROR: Python versie te oud. SigmaPips vereist Python 3.8 of hoger."
-    exit 1
-elif [ $PYTHON_MAJOR -eq 3 ] && [ $PYTHON_MINOR -lt 8 ]; then
-    echo "ERROR: Python $PYTHON_VERSION gedetecteerd. SigmaPips vereist Python 3.8 of hoger."
-    exit 1
+# Check for specific Python versions in order of preference
+if command -v python3.10 &> /dev/null; then
+    PYTHON_COMMAND="python3.10"
+elif command -v python3.9 &> /dev/null; then
+    PYTHON_COMMAND="python3.9"
+elif command -v python3.8 &> /dev/null; then
+    PYTHON_COMMAND="python3.8"
 fi
 
-# Als we hier komen, is Python 3.8 of hoger
-echo "Python $PYTHON_VERSION gedetecteerd. Dit is compatibel."
+echo "Using Python command: $PYTHON_COMMAND"
 
-# Controleer of venv module beschikbaar is
-if ! python3 -c "import venv" &> /dev/null; then
-    echo "ERROR: Python venv module is niet beschikbaar. Installeer python3-venv en probeer het opnieuw."
-    exit 1
+# Stop any existing bot instances
+echo "Stopping any existing bot instances..."
+$PYTHON_COMMAND stop_existing_bots.py
+
+# Create log directory if it doesn't exist
+if [ ! -d "logs" ]; then
+    mkdir -p logs
+    echo "Logs directory created."
 fi
 
-# Stel virtual environment in als die niet bestaat
-if [ ! -d "venv" ]; then
-    echo "Virtual environment niet gevonden. Nieuw environment maken..."
-    python3 -m venv venv
-    if [ $? -ne 0 ]; then
-        echo "ERROR: Kon geen virtual environment maken. Controleer je Python installatie."
-        exit 1
-    fi
+# Continue with virtual environment setup
+VENV_DIR="venv"
+
+# Controleer of virtuele omgeving bestaat
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Virtuele omgeving niet gevonden, aanmaken..."
+    $PYTHON_COMMAND -m venv $VENV_DIR
+    echo "Virtuele omgeving aangemaakt."
 fi
 
-# Activeer de virtual environment
-echo "Virtual environment activeren..."
-source venv/bin/activate
-
-# Installeer dependencies als ze nog niet geïnstalleerd zijn
-echo "Dependencies controleren..."
-if ! pip show yfinance &> /dev/null; then
-    echo "yfinance niet gevonden. Dependencies worden geïnstalleerd..."
-    pip install --upgrade yfinance  # Install latest version
-    pip install -r requirements.txt
+# Activeer virtuele omgeving
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+    # Windows
+    source $VENV_DIR/Scripts/activate
 else
-    echo "Dependencies lijken al geïnstalleerd te zijn."
-    # Update yfinance to latest version anyway
-    pip install --upgrade yfinance
+    # Linux/Mac
+    source $VENV_DIR/bin/activate
 fi
 
-# Controleer of .env bestand bestaat
-if [ ! -f ".env" ]; then
-    echo "LET OP: .env bestand niet gevonden. Sommige functionaliteiten kunnen beperkt zijn."
-    echo "Het is aanbevolen om een .env bestand te maken met de benodigde API keys."
-fi
+# Installeer/update dependencies
+echo "Dependencies installeren/updaten..."
+pip install -r requirements.txt
 
 # Start de bot
 echo "======================================================"
 echo "          SIGMAPIPS TRADING BOT STARTEN               "
 echo "======================================================"
-echo ""
 python -m trading_bot.main
 
-# Deactiveer de virtual environment wanneer de bot stopt
+# Deactiveer virtuele omgeving (wordt alleen bereikt als bot wordt afgesloten)
 deactivate 
