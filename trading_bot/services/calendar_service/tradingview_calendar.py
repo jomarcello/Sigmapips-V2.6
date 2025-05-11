@@ -12,13 +12,20 @@ from typing import Dict, List, Any, Optional, Union
 from pathlib import Path
 import re
 
+# Configure logging first, before any imports that use it
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 # Import onze custom mock data generator
 try:
     from trading_bot.services.calendar_service._generate_mock_calendar_data import generate_mock_calendar_data
     HAS_CUSTOM_MOCK_DATA = True
 except ImportError:
     HAS_CUSTOM_MOCK_DATA = False
-    logging.getLogger(__name__).warning("Custom mock calendar data not available, using default mock data")
+    logger.warning("Custom mock calendar data not available, using default mock data")
 
 # Import our chronological formatter
 try:
@@ -32,13 +39,6 @@ try:
 except ImportError:
     HAS_CHRONOLOGICAL_FORMATTER = False
     logger.warning("Chronological calendar formatter not available")
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
 
 # Map of major currencies to country codes for TradingView API
 CURRENCY_COUNTRY_MAP = {
