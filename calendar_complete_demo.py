@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from calendar_service_test import TodayCalendarService, MAJOR_CURRENCIES, CURRENCY_FLAGS, IMPACT_EMOJI
+from calendar_service import TodayCalendarService, MAJOR_CURRENCIES, CURRENCY_FLAGS, IMPACT_EMOJI
 
 # Configureer logging
 logging.basicConfig(level=logging.INFO, 
