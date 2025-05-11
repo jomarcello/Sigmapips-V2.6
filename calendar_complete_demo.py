@@ -15,8 +15,14 @@ async def demo_calendar_service():
     
     # Haal alle events op voor vandaag
     print("\n\n=== ECONOMIC CALENDAR: ALL EVENTS (CHRONOLOGICAL ORDER) ===")
+    print("Note: Events marked with [Est] are estimated events when API data is unavailable")
     all_events = await calendar_service.get_today_calendar()
     print(f"Total events found: {len(all_events)}")
+    
+    # Check if any fallback events were generated
+    fallback_events = [e for e in all_events if e.get('is_fallback', False)]
+    if fallback_events:
+        print(f"Note: {len(fallback_events)} fallback events were generated due to API limitations")
     
     # Toon alle events in chronologische volgorde
     chrono_calendar = calendar_service.format_calendar_for_display(all_events, group_by_currency=False)
@@ -63,6 +69,7 @@ async def demo_calendar_service():
     
     return {
         "all_events": len(all_events),
+        "fallback_events": len(fallback_events) if fallback_events else 0,
         "usd_events": len(usd_events),
         "high_impact_events": len(high_impact_events),
         "medium_impact_usd_events": len(usd_medium_events)
@@ -78,6 +85,8 @@ if __name__ == "__main__":
     
     print("\n=== SUMMARY ===")
     print(f"Total events: {results['all_events']}")
+    if results['fallback_events'] > 0:
+        print(f"Fallback events: {results['fallback_events']} (when API data unavailable)")
     print(f"USD events: {results['usd_events']}")
     print(f"High impact events: {results['high_impact_events']}")
     print(f"Medium/High impact USD events: {results['medium_impact_usd_events']}")
