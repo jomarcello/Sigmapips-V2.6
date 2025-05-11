@@ -3,8 +3,9 @@ import logging
 import json
 import aiohttp
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import random
+import base64
 
 # Configureer logging
 logging.basicConfig(level=logging.INFO, 
@@ -82,8 +83,10 @@ FALLBACK_EVENTS = {
 class TodayCalendarService:
     """Calendar service die events van vandaag toont voor major currencies"""
     
-    def __init__(self, tz_offset=8):  # Malaysia time (UTC+8)
+    def __init__(self, tz_offset=8, scraping_ant_key=None):  # Malaysia time (UTC+8)
         self.base_url = "https://economic-calendar.tradingview.com/events"
+        self.scraping_ant_url = "https://api.scrapingant.com/v2/general"
+        self.scraping_ant_key = scraping_ant_key
         self.session = None
         
         # Configureer tijdzone offset (Malaysia = UTC+8)
@@ -96,6 +99,8 @@ class TodayCalendarService:
         self.today_str = self.today.strftime("%Y-%m-%d")
         self.today_formatted = self.today.strftime("%A, %d %B %Y")  # Bijv. "Monday, 12 May 2025"
         logger.info(f"TodayCalendarService initialized for {self.today_formatted} ({self.timezone_name})")
+        if scraping_ant_key:
+            logger.info(f"ScrapingAnt proxy enabled with key: {scraping_ant_key[:5]}...{scraping_ant_key[-3:]}")
         
     async def _ensure_session(self):
         """Ensure we have an active aiohttp session"""
@@ -184,69 +189,90 @@ class TodayCalendarService:
                 "Pragma": "no-cache"
             }
             
-            # Direct API call to TradingView
-            logger.info(f"Making API request to: {self.base_url}")
-            
             # Use a longer timeout to prevent hanging
             timeout = aiohttp.ClientTimeout(total=30)
             
-            async with self.session.get(self.base_url, params=params, headers=headers, timeout=timeout) as response:
-                logger.info(f"Got response with status: {response.status}")
-                
-                if response.status != 200:
-                    logger.error(f"Error response from TradingView (status {response.status})")
-                    return self._generate_fallback_events(min_impact, currency)
+            # Determine if we should use ScrapingAnt or direct API
+            if self.scraping_ant_key:
+                # Use ScrapingAnt proxy
+                response_text = await self._fetch_with_scraping_ant(params)
+            else:
+                # Direct API call to TradingView
+                logger.info(f"Making direct API request to: {self.base_url}")
+                async with self.session.get(self.base_url, params=params, headers=headers, timeout=timeout) as response:
+                    logger.info(f"Got response with status: {response.status}")
                     
-                # Verwerk de response
-                response_text = await response.text()
-                
-                # Controleer of de API een geldige JSON-respons geeft
-                if not response_text or not (response_text.strip().startswith('[') or response_text.strip().startswith('{')):
-                    logger.error("API returned invalid or empty response")
-                    return self._generate_fallback_events(min_impact, currency)
-                
-                # Parse JSON response
-                try:
-                    data = json.loads(response_text)
-                    
-                    # Check for different response formats
-                    events_data = []
-                    
-                    # Format 1: Direct array of events
-                    if isinstance(data, list):
-                        events_data = data
-                        logger.info(f"Found {len(events_data)} events in API response (array format)")
-                    
-                    # Format 2: Object with 'result' containing events
-                    elif isinstance(data, dict) and 'result' in data:
-                        events_data = data['result']
-                        logger.info(f"Found {len(events_data)} events in API response (result object format)")
-                    
-                    # Format 3: Object with 'data' containing events
-                    elif isinstance(data, dict) and 'data' in data:
-                        events_data = data['data']
-                        logger.info(f"Found {len(events_data)} events in API response (data object format)")
-                    
-                    else:
-                        logger.warning(f"Unexpected response format: {type(data)}")
-                        logger.warning("API returned valid response but no calendar events were found")
+                    if response.status != 200:
+                        logger.error(f"Error response from TradingView (status {response.status})")
                         return self._generate_fallback_events(min_impact, currency)
-                    
-                    # Process events
-                    processed_events = self._process_events(events_data, min_impact, currency)
-                    logger.info(f"Processed {len(processed_events)} events for today")
-                    
-                    # If no events were found, generate fallback events
-                    if not processed_events:
-                        logger.warning("No events found after processing, generating fallback events")
-                        return self._generate_fallback_events(min_impact, currency)
-                    
-                    return processed_events
                         
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse response as JSON: {e}")
+                    # Verwerk de response
+                    response_text = await response.text()
+            
+            # Controleer of de API een geldige JSON-respons geeft
+            if not response_text or not (response_text.strip().startswith('[') or response_text.strip().startswith('{')):
+                logger.error("API returned invalid or empty response")
+                return self._generate_fallback_events(min_impact, currency)
+            
+            # Parse JSON response
+            try:
+                data = json.loads(response_text)
+                
+                # Check for different response formats
+                events_data = []
+                
+                # Format 1: Direct array of events
+                if isinstance(data, list):
+                    events_data = data
+                    logger.info(f"Found {len(events_data)} events in API response (array format)")
+                
+                # Format 2: Object with 'result' containing events
+                elif isinstance(data, dict) and 'result' in data:
+                    events_data = data['result']
+                    logger.info(f"Found {len(events_data)} events in API response (result object format)")
+                
+                # Format 3: Object with 'data' containing events
+                elif isinstance(data, dict) and 'data' in data:
+                    events_data = data['data']
+                    logger.info(f"Found {len(events_data)} events in API response (data object format)")
+                
+                # Format 4: ScrapingAnt format with 'content' containing JSON string
+                elif isinstance(data, dict) and 'content' in data and isinstance(data.get('content'), str):
+                    try:
+                        content_data = json.loads(data['content'])
+                        if isinstance(content_data, list):
+                            events_data = content_data
+                            logger.info(f"Found {len(events_data)} events in ScrapingAnt content (array format)")
+                        elif isinstance(content_data, dict) and 'result' in content_data:
+                            events_data = content_data['result']
+                            logger.info(f"Found {len(events_data)} events in ScrapingAnt content (result object format)")
+                        elif isinstance(content_data, dict) and 'data' in content_data:
+                            events_data = content_data['data']
+                            logger.info(f"Found {len(events_data)} events in ScrapingAnt content (data object format)")
+                    except json.JSONDecodeError:
+                        logger.error("Failed to parse ScrapingAnt content as JSON")
+                        return self._generate_fallback_events(min_impact, currency)
+                
+                else:
+                    logger.warning(f"Unexpected response format: {type(data)}")
+                    logger.warning("API returned valid response but no calendar events were found")
                     return self._generate_fallback_events(min_impact, currency)
+                
+                # Process events
+                processed_events = self._process_events(events_data, min_impact, currency)
+                logger.info(f"Processed {len(processed_events)} events for today")
+                
+                # If no events were found, generate fallback events
+                if not processed_events:
+                    logger.warning("No events found after processing, generating fallback events")
+                    return self._generate_fallback_events(min_impact, currency)
+                
+                return processed_events
                     
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse response as JSON: {e}")
+                return self._generate_fallback_events(min_impact, currency)
+                
         except Exception as e:
             logger.error(f"Error in get_today_calendar: {e}")
             import traceback
@@ -255,6 +281,56 @@ class TodayCalendarService:
         finally:
             # Ensure we close the session
             await self._close_session()
+    
+    async def _fetch_with_scraping_ant(self, params: Dict) -> Optional[str]:
+        """Fetch data using ScrapingAnt proxy"""
+        try:
+            # Build TradingView URL with parameters
+            url = self.base_url
+            query_params = "&".join([f"{k}={v}" for k, v in params.items()])
+            full_url = f"{url}?{query_params}"
+            
+            logger.info(f"Making ScrapingAnt request for URL: {full_url}")
+            
+            # Prepare ScrapingAnt request
+            scraping_params = {
+                "url": full_url,
+                "browser": True,
+                "return_page_source": True,
+                "proxy_type": "residential",
+                "wait_for_selector": "body"
+            }
+            
+            headers = {
+                "x-api-key": self.scraping_ant_key,
+                "Content-Type": "application/json"
+            }
+            
+            # Make request to ScrapingAnt
+            async with self.session.post(
+                self.scraping_ant_url, 
+                json=scraping_params, 
+                headers=headers
+            ) as response:
+                logger.info(f"ScrapingAnt response status: {response.status}")
+                
+                if response.status != 200:
+                    logger.error(f"ScrapingAnt error: {response.status}")
+                    return None
+                
+                # Get response JSON
+                response_json = await response.json()
+                
+                # Check if we have content
+                if "content" not in response_json:
+                    logger.error("No content in ScrapingAnt response")
+                    return None
+                
+                return response_json["content"]
+                
+        except Exception as e:
+            logger.error(f"Error in ScrapingAnt request: {e}")
+            return None
     
     def _generate_fallback_events(self, min_impact: str = "Low", currency: str = None) -> List[Dict[str, Any]]:
         """Generate fallback events when API fails"""
@@ -549,11 +625,11 @@ class TodayCalendarService:
         
         return "\n".join(output)
 
-async def test_today_calendar():
+async def test_today_calendar(scraping_ant_key=None):
     """Test de calendar service voor vandaag"""
     
     logger.info("Initializing calendar service for today...")
-    calendar_service = TodayCalendarService(tz_offset=8)  # Malaysia Time (UTC+8)
+    calendar_service = TodayCalendarService(tz_offset=8, scraping_ant_key=scraping_ant_key)  # Malaysia Time (UTC+8)
     
     # Haal events op voor vandaag
     logger.info("Fetching calendar data for today...")
@@ -588,8 +664,17 @@ async def test_today_calendar():
     }
 
 if __name__ == "__main__":
+    # Check if ScrapingAnt key is provided in environment
+    import os
+    scraping_ant_key = os.environ.get("SCRAPING_ANT_KEY")
+    
     logger.info("Starting calendar test for today...")
-    results = asyncio.run(test_today_calendar())
+    if scraping_ant_key:
+        logger.info(f"Using ScrapingAnt with key: {scraping_ant_key[:5]}...{scraping_ant_key[-3:]}")
+    else:
+        logger.info("No ScrapingAnt key found, using direct API access")
+        
+    results = asyncio.run(test_today_calendar(scraping_ant_key))
     
     print("\n=== ECONOMIC CALENDAR ===")
     print(f"Date: {results['today']}")

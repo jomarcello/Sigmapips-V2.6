@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from calendar_service import TodayCalendarService, MAJOR_CURRENCIES, CURRENCY_FLAGS, IMPACT_EMOJI
 
 # Configureer logging
@@ -10,8 +11,15 @@ logger = logging.getLogger(__name__)
 async def demo_calendar_service():
     """Demonstreer de calendar service met events in chronologische volgorde op tijd"""
     
+    # Check if ScrapingAnt key is available
+    scraping_ant_key = os.environ.get("SCRAPING_ANT_KEY")
+    if scraping_ant_key:
+        logger.info(f"Using ScrapingAnt proxy with key: {scraping_ant_key[:5]}...{scraping_ant_key[-3:]}")
+    else:
+        logger.info("No ScrapingAnt key found, using direct API access")
+    
     # Initialiseer de service met Maleisische tijd (UTC+8)
-    calendar_service = TodayCalendarService(tz_offset=8)
+    calendar_service = TodayCalendarService(tz_offset=8, scraping_ant_key=scraping_ant_key)
     
     # Haal alle events op voor vandaag
     print("\n\n=== ECONOMIC CALENDAR: ALL EVENTS (CHRONOLOGICAL ORDER) ===")
