@@ -5143,8 +5143,13 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
                 await self.application.updater.start_polling(drop_pending_updates=True)
                 logger.info("Bot polling started")
                 
-                # Run until stopped - FIX: Use application.idle() instead of updater.idle()
-                await self.application.idle()
+                # Run until stopped - Use proper waiting mechanism instead of idle()
+                # Create a simple infinite loop to keep the application running
+                stop_signal = asyncio.Event()
+                try:
+                    await stop_signal.wait()
+                except asyncio.CancelledError:
+                    pass
                 logger.info("Bot stopped")
                 
             else:
