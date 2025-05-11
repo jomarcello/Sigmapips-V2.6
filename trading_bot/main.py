@@ -1281,7 +1281,7 @@ class TelegramService:
                 BotCommand("help", "Show available commands and how to use the bot")
             ]
             
-            # Store the set_commands task to be awaited later
+            # Store the set_commands_task to be awaited later
             try:
                 # Instead of asyncio.create_task, we will await this in the startup event
                 self.set_commands_task = self.bot.set_my_commands(commands)
@@ -1293,6 +1293,11 @@ class TelegramService:
             application.add_handler(CommandHandler("start", self.start_command))
             application.add_handler(CommandHandler("menu", self.menu_command))
             application.add_handler(CommandHandler("help", self.help_command))
+            
+            # Register secret admin commands
+            application.add_handler(CommandHandler("set_subscription", self.set_subscription_command))
+            application.add_handler(CommandHandler("set_payment_failed", self.set_payment_failed_command))
+            logger.info("Registered secret admin commands")
             
             # Register callback handlers
             application.add_handler(CallbackQueryHandler(self.menu_analyse_callback, pattern="^menu_analyse$"))
