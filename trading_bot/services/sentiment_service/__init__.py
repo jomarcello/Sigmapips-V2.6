@@ -76,7 +76,29 @@ except ImportError as e:
         
         def _format_compact_sentiment_text(self, instrument, bullish_pct, bearish_pct, neutral_pct=None):
             """Format sentiment in compact text format suitable for Telegram"""
-            return f"<b>🎯 {instrument} Market Analysis</b>\n\n⚠️ Using fallback sentiment service. Please check configuration."
+            # Calculate neutral if not provided
+            if neutral_pct is None:
+                neutral_pct = 100 - bullish_pct - bearish_pct
+                
+            # Use the new format but with fallback message
+            formatted_text = f"""<b>🎯 {instrument.upper()} MARKET SENTIMENT 📈</b>
+
+<b>🟢 BULLISH</b> | <i>Market Intelligence Report</i>
+
+<b>📊 SENTIMENT BREAKDOWN:</b>
+🟢 Bullish: {bullish_pct}%
+🔴 Bearish: {bearish_pct}%
+⚪️ Neutral: {neutral_pct}%
+
+<b>🔍 KEY MARKET DRIVERS:</b>
+⚠️ <b>Service Unavailable</b>: Using fallback sentiment service. Please check configuration.
+
+<b>📈 MARKET SUMMARY:</b>
+Unable to retrieve detailed market analysis. Using fallback service with estimated sentiment values.
+
+<i>Analysis powered by SigmaPips AI</i>"""
+
+            return formatted_text
 
 # Export the class
 __all__ = ["MarketSentimentService"]

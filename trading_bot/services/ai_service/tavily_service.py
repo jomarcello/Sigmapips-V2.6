@@ -266,6 +266,7 @@ CRITICAL REQUIREMENTS:
         combined_summary = f"{market_summary}\n\n"
         
         # If we have news items, format them into a paragraph
+        news_summary = ""
         if news_data:
             # Extract headlines and summaries
             news_items = []
@@ -285,29 +286,14 @@ CRITICAL REQUIREMENTS:
             
             # Create a coherent paragraph from the news items
             if news_items:
-                # Add a smooth transition between market summary and news items
-                # without an explicit header
-                combined_summary += "Recent market news shows "
-                
-                # Add appropriate sentiment context based on overall sentiment
-                if overall == "bullish":
-                    combined_summary += "supportive developments: "
-                elif overall == "bearish":
-                    combined_summary += "challenging conditions: "
-                else:
-                    combined_summary += "mixed signals: "
+                news_summary = ""
                 
                 # Add each news item to the summary
                 for i, item in enumerate(news_items):
-                    # Add transitional phrases between news items
-                    if i > 0:
-                        if i == len(news_items) - 1:
-                            combined_summary += " Finally, "
-                        else:
-                            combined_summary += " Additionally, "
-                    
                     # Add the news item content
-                    combined_summary += f"{item['headline']}: {item['summary'].rstrip('.')}. "
+                    if i > 0:
+                        news_summary += " "
+                    news_summary += f"{item['headline']}: {item['summary'].rstrip('.')}."
         
         # Combine all sections with fancy formatting
         formatted_text = f"""<b>🎯 {instrument.upper()} MARKET SENTIMENT {sentiment_emoji}</b>
@@ -323,6 +309,8 @@ CRITICAL REQUIREMENTS:
 {key_drivers_text}
 <b>📈 MARKET SUMMARY:</b>
 {combined_summary}
+
+<b>Key recent news affecting the market:</b> {news_summary if news_summary else "No significant recent news available."}
 
 <i>Analysis powered by SigmaPips AI</i>"""
 

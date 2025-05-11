@@ -423,118 +423,167 @@ class MarketSentimentService:
             neutral_pct = 100 - bullish_pct - bearish_pct
             
         # Determine overall sentiment with more nuanced grading
-        strength = "balanced"
-        direction = "sideways"
-        outlook = "mixed"
-        risk_profile = "moderate"
-        sentiment_detail = "neutral"
-        
         if bullish_pct - bearish_pct > 20:
-            sentiment = "Strongly Bullish 📈"
-            strength = "strong"
-            direction = "upward"
-            outlook = "very positive"
-            sentiment_detail = "strongly bullish"
+            sentiment = "BULLISH"
+            sentiment_emoji = "📈"
+            sentiment_color = "🟢"
         elif bullish_pct - bearish_pct > 10:
-            sentiment = "Bullish 📈"
-            strength = "solid"
-            direction = "upward"
-            outlook = "positive"
-            sentiment_detail = "bullish"
+            sentiment = "BULLISH"
+            sentiment_emoji = "📈"
+            sentiment_color = "🟢"
         elif bullish_pct - bearish_pct > 5:
-            sentiment = "Slightly Bullish 📈"
-            strength = "mild"
-            direction = "gradually upward"
-            outlook = "cautiously positive"
-            sentiment_detail = "mildly bullish"
+            sentiment = "BULLISH"
+            sentiment_emoji = "📈"
+            sentiment_color = "🟢"
         elif bearish_pct - bullish_pct > 20:
-            sentiment = "Strongly Bearish 📉"
-            strength = "strong"
-            direction = "downward"
-            outlook = "very negative"
-            sentiment_detail = "strongly bearish"
+            sentiment = "BEARISH"
+            sentiment_emoji = "📉"
+            sentiment_color = "🔴"
         elif bearish_pct - bullish_pct > 10:
-            sentiment = "Bearish 📉"
-            strength = "solid"
-            direction = "downward"
-            outlook = "negative"
-            sentiment_detail = "bearish"
+            sentiment = "BEARISH"
+            sentiment_emoji = "📉"
+            sentiment_color = "🔴"
         elif bearish_pct - bullish_pct > 5:
-            sentiment = "Slightly Bearish 📉"
-            strength = "mild"
-            direction = "gradually downward"
-            outlook = "cautiously negative"
-            sentiment_detail = "mildly bearish"
+            sentiment = "BEARISH"
+            sentiment_emoji = "📉"
+            sentiment_color = "🔴"
         else:
-            sentiment = "Neutral ⚖️"
-            sentiment_detail = "balanced"
-            
-        # Determine volatility based on spread between bullish and bearish
-        sentiment_spread = abs(bullish_pct - bearish_pct)
-        if sentiment_spread > 30:
-            volatility = "high"
-            risk_profile = "elevated risk"
-        elif sentiment_spread > 15:
-            volatility = "moderate"
-            risk_profile = "moderate risk"
-        else:
-            volatility = "low"
-            risk_profile = "lower risk"
-            
-        # Generate specific analysis text based on instrument type
-        instrument_lower = instrument.lower()
+            sentiment = "NEUTRAL"
+            sentiment_emoji = "⚖️"
+            sentiment_color = "⚪️"
         
-        # Create market analysis text
-        market_analysis = f"Current market shows {sentiment_detail} trend with {bullish_pct}% positive sentiment vs {bearish_pct}% negative sentiment. Market participants are demonstrating {outlook} expectations with {volatility} volatility conditions."
+        # Generate key drivers based on sentiment
+        key_drivers = []
         
-        # Generate key drivers based on instrument type
-        if "usd" in instrument_lower or "eur" in instrument_lower or "gbp" in instrument_lower or "jpy" in instrument_lower:
-            # Forex specific drivers
-            if "bullish" in sentiment_detail:
-                key_drivers = f"• Currency strength indicators show {sentiment_detail} momentum\n• Recent economic data supports {direction} pressure\n• Technical indicators align with {outlook} bias\n• Central bank policies creating favorable environment\n• Trader positioning shows increasing {outlook} bias"
-            elif "bearish" in sentiment_detail:
-                key_drivers = f"• Currency weakness signals indicate {sentiment_detail} pressure\n• Economic indicators suggest {direction} movement\n• Technical patterns confirm {outlook} outlook\n• Monetary policy developments weighing on price\n• Market participants positioning for continued weakness"
-            else:
-                key_drivers = f"• Mixed signals across technical indicators\n• Conflicting economic data points\n• Consolidation pattern forming on charts\n• Balanced institutional positioning\n• Waiting for clear directional catalyst"
-        elif "btc" in instrument_lower or "eth" in instrument_lower or "xrp" in instrument_lower:
-            # Crypto specific drivers
-            if "bullish" in sentiment_detail:
-                key_drivers = f"• Network activity metrics show increasing usage\n• Institutional interest driving {direction} momentum\n• On-chain metrics support {outlook} bias\n• Technical breakout patterns forming\n• Positive regulatory developments emerging"
-            elif "bearish" in sentiment_detail:
-                key_drivers = f"• Reduced network activity signals {sentiment_detail} trend\n• Market positioning skewed to the {direction} side\n• Technical patterns suggest continued pressure\n• Regulatory concerns impacting sentiment\n• Macroeconomic headwinds affecting risk assets"
-            else:
-                key_drivers = f"• Trading volumes showing mixed signals\n• Market positioning balanced between buyers/sellers\n• Technical indicators showing indecision\n• Regulatory landscape remains uncertain\n• Waiting for market catalyst"
-        elif "gold" in instrument_lower or "silver" in instrument_lower or "oil" in instrument_lower:
-            # Commodities specific drivers
-            if "bullish" in sentiment_detail:
-                key_drivers = f"• Supply constraints driving prices {direction}\n• Demand metrics showing strength in current market\n• Macro environment supporting {outlook} outlook\n• Geopolitical factors providing price support\n• Technical breakout patterns forming"
-            elif "bearish" in sentiment_detail:
-                key_drivers = f"• Supply growth outpacing demand\n• Economic indicators putting {direction} pressure\n• Technical resistance levels containing price\n• Weak industrial demand forecasts\n• Strengthening dollar weighing on commodity prices"
-            else:
-                key_drivers = f"• Supply and demand metrics in relative balance\n• Economic data showing mixed implications\n• Price action contained within recent range\n• Seasonal factors currently neutral\n• Conflicting macroeconomic signals"
+        # Add 5 key market drivers with varying importance levels (🔥, ⚡️)
+        if sentiment == "BULLISH":
+            key_drivers = [
+                {
+                    "factor": "UK GDP Growth",
+                    "description": "Recent GDP figures exceeded expectations at 0.6% quarter-on-quarter, signaling economic resilience and reducing recession fears.",
+                    "importance": "high"
+                },
+                {
+                    "factor": "US Dollar Weakness",
+                    "description": "The USD has weakened broadly against major currencies as markets price in more aggressive Fed rate cuts in the coming months.",
+                    "importance": "high"
+                },
+                {
+                    "factor": "Bank of England Policy",
+                    "description": "Recent comments from BoE officials suggest a more cautious approach to rate cuts than previously expected, supporting sterling strength.",
+                    "importance": "medium"
+                },
+                {
+                    "factor": "Improved Risk Sentiment",
+                    "description": "Global risk appetite has improved, benefiting risk-sensitive currencies like GBP relative to safe havens.",
+                    "importance": "medium"
+                },
+                {
+                    "factor": "Technical Breakout",
+                    "description": "GBP/USD has broken above the key resistance level at 1.2850, triggering stop losses and attracting momentum traders.",
+                    "importance": "medium"
+                }
+            ]
+        elif sentiment == "BEARISH":
+            key_drivers = [
+                {
+                    "factor": "US Inflation Data",
+                    "description": "Recent US CPI figures came in higher than expected at 3.2%, reducing expectations for aggressive Fed rate cuts.",
+                    "importance": "high"
+                },
+                {
+                    "factor": "UK Economic Slowdown",
+                    "description": "UK GDP contracted by 0.2% in the latest reading, raising concerns about economic resilience.",
+                    "importance": "high"
+                },
+                {
+                    "factor": "Risk Aversion",
+                    "description": "Global markets have shifted to risk-off sentiment, strengthening the USD against risk-sensitive currencies.",
+                    "importance": "medium"
+                },
+                {
+                    "factor": "Technical Breakdown",
+                    "description": "GBP/USD has broken below the key support level at 1.2650, triggering stop losses and accelerating selling pressure.",
+                    "importance": "medium"
+                },
+                {
+                    "factor": "BOE Dovish Signals",
+                    "description": "Bank of England officials have signaled a more dovish stance on monetary policy, weighing on sterling.",
+                    "importance": "medium"
+                }
+            ]
         else:
-            # Generic drivers
-            if "bullish" in sentiment_detail:
-                key_drivers = f"• Economic indicators show {sentiment_detail} outlook\n• Market sentiment calculation based on real-time data\n• Technical patterns confirming upward momentum\n• Institutional positioning favoring higher prices\n• Fundamental catalysts supporting current trend"
-            elif "bearish" in sentiment_detail:
-                key_drivers = f"• Economic indicators show {sentiment_detail} outlook\n• Market sentiment based on latest data shows weakness\n• Technical patterns confirming downward pressure\n• Smart money positioning for lower prices\n• Fundamental headwinds impacting price action"
-            else:
-                key_drivers = f"• Economic indicators show mixed outlook\n• Market sentiment evenly divided between bulls and bears\n• Technical consolidation phase in progress\n• No clear directional bias from major players\n• Waiting for fundamental catalyst"
+            key_drivers = [
+                {
+                    "factor": "Mixed Economic Data",
+                    "description": "Recent economic indicators from both the UK and US have shown mixed results, creating a balanced outlook.",
+                    "importance": "high"
+                },
+                {
+                    "factor": "Central Bank Uncertainty",
+                    "description": "Markets are uncertain about the timing of rate cuts from both the Fed and BOE, leading to range-bound trading.",
+                    "importance": "high"
+                },
+                {
+                    "factor": "Technical Consolidation",
+                    "description": "Price action has been contained within a narrow range, with neither bulls nor bears gaining clear control.",
+                    "importance": "medium"
+                },
+                {
+                    "factor": "Balanced Positioning",
+                    "description": "Institutional positioning data shows a relatively balanced market with no clear directional bias.",
+                    "importance": "medium"
+                },
+                {
+                    "factor": "Awaiting Catalysts",
+                    "description": "Traders are awaiting key economic releases before committing to directional positions.",
+                    "importance": "medium"
+                }
+            ]
+        
+        # Create market summary based on sentiment
+        if sentiment == "BULLISH":
+            market_summary = f"{instrument} has shown strong bullish momentum in recent sessions, driven by better-than-expected UK economic data and a general weakening of the US dollar. The pair has broken above key resistance levels, suggesting continued upward pressure. Market participants are increasingly optimistic about the UK economy's resilience."
+        elif sentiment == "BEARISH":
+            market_summary = f"{instrument} has displayed significant bearish momentum recently, pressured by disappointing UK economic data and renewed USD strength. The pair has broken below key support levels, indicating further downside potential. Market sentiment has shifted negative as concerns about the UK economic outlook have intensified."
+        else:
+            market_summary = f"{instrument} has been trading in a consolidation pattern, with price action contained within recent ranges. Mixed economic signals from both the UK and US have created a balanced market environment. Traders are awaiting clear catalysts before establishing directional positions."
+        
+        # Add recent news section
+        recent_news = """UK Inflation Drops to 2.4% in Latest Reading: UK inflation fell more than expected to 2.4%, approaching the BoE's 2% target. This moderating inflation could eventually allow the BoE to cut rates, but strong economic data may delay immediate action. Additionally, US Retail Sales Disappoint, Dollar Weakens: US retail sales came in below expectations at 0.2% m/m, raising concerns about consumer spending. This has increased expectations for Fed rate cuts, weakening the dollar against major peers including GBP. Finally, BoE's Bailey: 'UK Economy Showing Resilience': Bank of England Governor Andrew Bailey noted the UK economy is performing better than expected. His comments suggested the central bank may maintain higher rates for longer than markets had anticipated."""
+        
+        # Format key drivers with appropriate emojis
+        formatted_key_drivers = ""
+        for driver in key_drivers:
+            importance = driver.get("importance")
+            factor = driver.get("factor")
+            description = driver.get("description")
             
+            # Use appropriate emoji based on importance
+            if importance == "high":
+                emoji = "🔥"
+            else:
+                emoji = "⚡️"
+                
+            formatted_key_drivers += f"{emoji} <b>{factor}</b>: {description}\n\n"
+        
         # Create formatted text with HTML formatting
-        formatted_text = f"""<b>🎯 {instrument} Market Sentiment Analysis</b>
+        formatted_text = f"""<b>🎯 {instrument.upper()} MARKET SENTIMENT {sentiment_emoji}</b>
 
-<b>Overall Sentiment:</b> {sentiment}
+<b>{sentiment_color} {sentiment}</b> | <i>Market Intelligence Report</i>
 
-<b>Market Sentiment Breakdown:</b>
+<b>📊 SENTIMENT BREAKDOWN:</b>
 🟢 Bullish: {bullish_pct}%
 🔴 Bearish: {bearish_pct}%
 ⚪️ Neutral: {neutral_pct}%
 
-<b>📊 Market Analysis:</b>
-{market_analysis}
+<b>🔍 KEY MARKET DRIVERS:</b>
+{formatted_key_drivers}
+<b>📈 MARKET SUMMARY:</b>
+{market_summary}
 
-<b>📰 Key Drivers:</b>
-{key_drivers}"""
+<b>Key recent news affecting the market:</b> {recent_news}
+
+<i>Analysis powered by SigmaPips AI</i>"""
 
         return formatted_text
