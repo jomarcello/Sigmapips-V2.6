@@ -68,11 +68,28 @@ EXPOSE 8000
 # Create a startup script that runs both the FastAPI server and the Telegram bot
 RUN echo '#!/bin/bash\n\
 echo "Starting Trading Bot Services..."\n\
+\n\
 # First, stop any existing Telegram bot processes\n\
 echo "Stopping any existing Telegram bot processes..."\n\
-python /app/stop_existing_bots.py\n\
+\n\
+# Find and kill any Python processes that might be running our bot\n\
+for pid in $(ps aux | grep -E "python|python3" | grep -E "trading_bot|main.py|telegram|bot|sigmapips" | grep -v grep | awk "{print \$2}"); do\n\
+  echo "Killing process $pid"\n\
+  kill -9 $pid 2>/dev/null || true\n\
+done\n\
+\n\
+# Clear Telegram API sessions\n\
+BOT_TOKEN=${TELEGRAM_BOT_TOKEN}\n\
+if [ -n "$BOT_TOKEN" ]; then\n\
+  echo "Clearing Telegram API sessions..."\n\
+  curl -s "https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook?drop_pending_updates=true" > /dev/null\n\
+  curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?timeout=1&offset=-1&limit=1" > /dev/null\n\
+  sleep 2\n\
+fi\n\
+\n\
 # Start the FastAPI server in the background\n\
 python -m trading_bot.server & \n\
+\n\
 # Start the Telegram bot in the foreground\n\
 python -m trading_bot.main\n\
 ' > /app/start.sh
