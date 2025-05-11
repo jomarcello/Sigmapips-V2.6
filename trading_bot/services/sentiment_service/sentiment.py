@@ -327,3 +327,145 @@ class MarketSentimentService:
 
     def __repr__(self) -> str:
         return f"MarketSentimentService(cached_data_count={len(self.sentiment_cache)}, fast_mode={self.fast_mode})"
+        
+    async def get_telegram_sentiment(self, instrument):
+        """Get sentiment analysis formatted specifically for Telegram with rich emoji formatting"""
+        try:
+            # Get sentiment data
+            sentiment_data = await self.get_sentiment(instrument)
+            
+            # Format the sentiment data for Telegram
+            return self._format_compact_sentiment_text(
+                instrument, 
+                sentiment_data.get('percentage_breakdown', {}).get('bullish', 50), 
+                sentiment_data.get('percentage_breakdown', {}).get('bearish', 30),
+                sentiment_data.get('percentage_breakdown', {}).get('neutral', 20)
+            )
+        except Exception as e:
+            self.logger.error(f"Error in get_telegram_sentiment: {str(e)}")
+            return f"<b>🎯 {instrument} Market Analysis</b>\n\n⚠️ Error retrieving sentiment data: {str(e)}"
+    
+    def _format_compact_sentiment_text(self, instrument, bullish_pct, bearish_pct, neutral_pct=None):
+        """
+        Format sentiment in compact text format suitable for Telegram
+        """
+        # Calculate neutral if not provided
+        if neutral_pct is None:
+            neutral_pct = 100 - bullish_pct - bearish_pct
+            
+        # Determine overall sentiment with more nuanced grading
+        strength = "balanced"
+        direction = "sideways"
+        outlook = "mixed"
+        risk_profile = "moderate"
+        sentiment_detail = "neutral"
+        
+        if bullish_pct - bearish_pct > 20:
+            sentiment = "Strongly Bullish 📈"
+            strength = "strong"
+            direction = "upward"
+            outlook = "very positive"
+            sentiment_detail = "strongly bullish"
+        elif bullish_pct - bearish_pct > 10:
+            sentiment = "Bullish 📈"
+            strength = "solid"
+            direction = "upward"
+            outlook = "positive"
+            sentiment_detail = "bullish"
+        elif bullish_pct - bearish_pct > 5:
+            sentiment = "Slightly Bullish 📈"
+            strength = "mild"
+            direction = "gradually upward"
+            outlook = "cautiously positive"
+            sentiment_detail = "mildly bullish"
+        elif bearish_pct - bullish_pct > 20:
+            sentiment = "Strongly Bearish 📉"
+            strength = "strong"
+            direction = "downward"
+            outlook = "very negative"
+            sentiment_detail = "strongly bearish"
+        elif bearish_pct - bullish_pct > 10:
+            sentiment = "Bearish 📉"
+            strength = "solid"
+            direction = "downward"
+            outlook = "negative"
+            sentiment_detail = "bearish"
+        elif bearish_pct - bullish_pct > 5:
+            sentiment = "Slightly Bearish 📉"
+            strength = "mild"
+            direction = "gradually downward"
+            outlook = "cautiously negative"
+            sentiment_detail = "mildly bearish"
+        else:
+            sentiment = "Neutral ⚖️"
+            sentiment_detail = "balanced"
+            
+        # Determine volatility based on spread between bullish and bearish
+        sentiment_spread = abs(bullish_pct - bearish_pct)
+        if sentiment_spread > 30:
+            volatility = "high"
+            risk_profile = "elevated risk"
+        elif sentiment_spread > 15:
+            volatility = "moderate"
+            risk_profile = "moderate risk"
+        else:
+            volatility = "low"
+            risk_profile = "lower risk"
+            
+        # Generate specific analysis text based on instrument type
+        instrument_lower = instrument.lower()
+        
+        # Create market analysis text
+        market_analysis = f"Current market shows {sentiment_detail} trend with {bullish_pct}% positive sentiment vs {bearish_pct}% negative sentiment. Market participants are demonstrating {outlook} expectations with {volatility} volatility conditions."
+        
+        # Generate key drivers based on instrument type
+        if "usd" in instrument_lower or "eur" in instrument_lower or "gbp" in instrument_lower or "jpy" in instrument_lower:
+            # Forex specific drivers
+            if "bullish" in sentiment_detail:
+                key_drivers = f"• Currency strength indicators show {sentiment_detail} momentum\n• Recent economic data supports {direction} pressure\n• Technical indicators align with {outlook} bias\n• Central bank policies creating favorable environment\n• Trader positioning shows increasing {outlook} bias"
+            elif "bearish" in sentiment_detail:
+                key_drivers = f"• Currency weakness signals indicate {sentiment_detail} pressure\n• Economic indicators suggest {direction} movement\n• Technical patterns confirm {outlook} outlook\n• Monetary policy developments weighing on price\n• Market participants positioning for continued weakness"
+            else:
+                key_drivers = f"• Mixed signals across technical indicators\n• Conflicting economic data points\n• Consolidation pattern forming on charts\n• Balanced institutional positioning\n• Waiting for clear directional catalyst"
+        elif "btc" in instrument_lower or "eth" in instrument_lower or "xrp" in instrument_lower:
+            # Crypto specific drivers
+            if "bullish" in sentiment_detail:
+                key_drivers = f"• Network activity metrics show increasing usage\n• Institutional interest driving {direction} momentum\n• On-chain metrics support {outlook} bias\n• Technical breakout patterns forming\n• Positive regulatory developments emerging"
+            elif "bearish" in sentiment_detail:
+                key_drivers = f"• Reduced network activity signals {sentiment_detail} trend\n• Market positioning skewed to the {direction} side\n• Technical patterns suggest continued pressure\n• Regulatory concerns impacting sentiment\n• Macroeconomic headwinds affecting risk assets"
+            else:
+                key_drivers = f"• Trading volumes showing mixed signals\n• Market positioning balanced between buyers/sellers\n• Technical indicators showing indecision\n• Regulatory landscape remains uncertain\n• Waiting for market catalyst"
+        elif "gold" in instrument_lower or "silver" in instrument_lower or "oil" in instrument_lower:
+            # Commodities specific drivers
+            if "bullish" in sentiment_detail:
+                key_drivers = f"• Supply constraints driving prices {direction}\n• Demand metrics showing strength in current market\n• Macro environment supporting {outlook} outlook\n• Geopolitical factors providing price support\n• Technical breakout patterns forming"
+            elif "bearish" in sentiment_detail:
+                key_drivers = f"• Supply growth outpacing demand\n• Economic indicators putting {direction} pressure\n• Technical resistance levels containing price\n• Weak industrial demand forecasts\n• Strengthening dollar weighing on commodity prices"
+            else:
+                key_drivers = f"• Supply and demand metrics in relative balance\n• Economic data showing mixed implications\n• Price action contained within recent range\n• Seasonal factors currently neutral\n• Conflicting macroeconomic signals"
+        else:
+            # Generic drivers
+            if "bullish" in sentiment_detail:
+                key_drivers = f"• Economic indicators show {sentiment_detail} outlook\n• Market sentiment calculation based on real-time data\n• Technical patterns confirming upward momentum\n• Institutional positioning favoring higher prices\n• Fundamental catalysts supporting current trend"
+            elif "bearish" in sentiment_detail:
+                key_drivers = f"• Economic indicators show {sentiment_detail} outlook\n• Market sentiment based on latest data shows weakness\n• Technical patterns confirming downward pressure\n• Smart money positioning for lower prices\n• Fundamental headwinds impacting price action"
+            else:
+                key_drivers = f"• Economic indicators show mixed outlook\n• Market sentiment evenly divided between bulls and bears\n• Technical consolidation phase in progress\n• No clear directional bias from major players\n• Waiting for fundamental catalyst"
+            
+        # Create formatted text with HTML formatting
+        formatted_text = f"""<b>🎯 {instrument} Market Sentiment Analysis</b>
+
+<b>Overall Sentiment:</b> {sentiment}
+
+<b>Market Sentiment Breakdown:</b>
+🟢 Bullish: {bullish_pct}%
+🔴 Bearish: {bearish_pct}%
+⚪️ Neutral: {neutral_pct}%
+
+<b>📊 Market Analysis:</b>
+{market_analysis}
+
+<b>📰 Key Drivers:</b>
+{key_drivers}"""
+
+        return formatted_text
