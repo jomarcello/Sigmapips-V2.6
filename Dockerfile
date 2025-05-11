@@ -65,4 +65,16 @@ RUN ./docker_setup.sh
 EXPOSE 8000
 
 # Command to run the application
-CMD ["sh", "-c", "python -m trading_bot.main"]
+# Create a startup script that runs both the FastAPI server and the Telegram bot
+RUN echo '#!/bin/bash\n\
+echo "Starting Trading Bot Services..."\n\
+# Start the FastAPI server in the background\n\
+python -m trading_bot.server & \n\
+# Start the Telegram bot in the foreground\n\
+python -m trading_bot.main\n\
+' > /app/start.sh
+
+RUN chmod +x /app/start.sh
+
+# Run the startup script
+CMD ["/app/start.sh"]

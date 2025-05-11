@@ -1,12 +1,50 @@
+"""
+FastAPI web application for the trading bot
+"""
+
+import os
+import sys
+import json
+import logging
+import platform
+import psutil
+from datetime import datetime
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import importlib.util
+
+# Set up logger
+logger = logging.getLogger("trading_bot.api")
+
+# Create FastAPI app
+app = FastAPI(
+    title="Trading Bot API",
+    description="API for the trading bot",
+    version="1.0.0",
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+async def root():
+    """Root endpoint returning basic information"""
+    return {
+        "message": "Trading Bot API is running",
+        "version": os.environ.get("APP_VERSION", "1.0.0"),
+        "environment": os.environ.get("RAILWAY_ENVIRONMENT", "development"),
+        "documentation": "/docs"
+    }
+
 @app.get("/health")
 async def health_check():
     """Enhanced health check endpoint with detailed diagnostics"""
-    import os
-    import sys
-    import platform
-    import psutil
-    import logging
-    from datetime import datetime
     
     # Initialize response
     health_data = {
@@ -72,8 +110,6 @@ async def health_check():
     
     # Check for AI service modules
     try:
-        import importlib.util
-        
         def check_module(module_path):
             spec = importlib.util.find_spec(module_path)
             return spec is not None
@@ -87,4 +123,10 @@ async def health_check():
         health_data["services"]["module_check_error"] = str(e)
     
     # Return health data
-    return health_data 
+    return health_data
+
+# Add a simple ping endpoint for quick testing
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint for quick testing"""
+    return {"ping": "pong", "timestamp": datetime.now().isoformat()} 
