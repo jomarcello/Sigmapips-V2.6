@@ -896,24 +896,87 @@ class TelegramService:
     async def update_message(self, query, text, keyboard=None, parse_mode=ParseMode.HTML):
         """Utility to update a message with error handling"""
         try:
-            logger.info("Updating message")
-            # Try to edit message text first
-            await query.edit_message_text(
-                text=text,
-                reply_markup=keyboard,
-                parse_mode=parse_mode
-            )
-            return True
+            # Check if the message is too long for Telegram caption limits (1024 chars)
+            MAX_CAPTION_LENGTH = 1000  # Slightly under the 1024 limit for safety
+            MAX_MESSAGE_LENGTH = 4000  # Telegram message limit
+            
+            # Log message length for debugging
+            logger.info(f"Updating message (length: {len(text)} chars)")
+            
+            # If message is too long for a caption but ok for a text message
+            if len(text) > MAX_CAPTION_LENGTH and len(text) <= MAX_MESSAGE_LENGTH:
+                logger.info("Message too long for caption but ok for text message")
+                # Try to edit message text first
+                await query.edit_message_text(
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode=parse_mode
+                )
+                return True
+            # If message is too long even for a text message
+            elif len(text) > MAX_MESSAGE_LENGTH:
+                logger.warning(f"Message too long ({len(text)} chars), truncating")
+                # Find a good breaking point
+                truncated = text[:MAX_MESSAGE_LENGTH-100]
+                
+                # Try to break at a paragraph
+                last_newline = truncated.rfind('\n\n')
+                if last_newline > MAX_MESSAGE_LENGTH * 0.8:  # If we can keep at least 80% of the text
+                    truncated = truncated[:last_newline]
+                    
+                # Add indicator that text was truncated
+                truncated += "\n\n<i>... (message truncated)</i>"
+                
+                # Try to edit message text with truncated content
+                await query.edit_message_text(
+                    text=truncated,
+                    reply_markup=keyboard,
+                    parse_mode=parse_mode
+                )
+                return True
+            else:
+                # Normal case - message is within limits
+                # Try to edit message text first
+                await query.edit_message_text(
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode=parse_mode
+                )
+                return True
         except Exception as e:
             logger.warning(f"Could not update message text: {str(e)}")
             
             # If text update fails, try to edit caption
             try:
-                await query.edit_message_caption(
-                    caption=text,
-                    reply_markup=keyboard,
-                    parse_mode=parse_mode
-                )
+                # Check if caption is too long
+                MAX_CAPTION_LENGTH = 1000  # Slightly under the 1024 limit for safety
+                
+                if len(text) > MAX_CAPTION_LENGTH:
+                    logger.warning(f"Caption too long ({len(text)} chars), truncating")
+                    # Find a good breaking point
+                    truncated = text[:MAX_CAPTION_LENGTH-100]
+                    
+                    # Try to break at a paragraph
+                    last_newline = truncated.rfind('\n\n')
+                    if last_newline > MAX_CAPTION_LENGTH * 0.8:  # If we can keep at least 80% of the text
+                        truncated = truncated[:last_newline]
+                        
+                    # Add indicator that text was truncated
+                    truncated += "\n\n<i>... (message truncated)</i>"
+                    
+                    # Use truncated text for caption
+                    await query.edit_message_caption(
+                        caption=truncated,
+                        reply_markup=keyboard,
+                        parse_mode=parse_mode
+                    )
+                else:
+                    # Caption is within limits
+                    await query.edit_message_caption(
+                        caption=text,
+                        reply_markup=keyboard,
+                        parse_mode=parse_mode
+                    )
                 return True
             except Exception as e2:
                 logger.error(f"Could not update caption either: {str(e2)}")
@@ -921,12 +984,38 @@ class TelegramService:
                 # As a last resort, send a new message
                 try:
                     chat_id = query.message.chat_id
-                    await query.bot.send_message(
-                        chat_id=chat_id,
-                        text=text,
-                        reply_markup=keyboard,
-                        parse_mode=parse_mode
-                    )
+                    
+                    # Check if message is too long
+                    MAX_MESSAGE_LENGTH = 4000  # Telegram message limit
+                    
+                    if len(text) > MAX_MESSAGE_LENGTH:
+                        logger.warning(f"New message too long ({len(text)} chars), truncating")
+                        # Find a good breaking point
+                        truncated = text[:MAX_MESSAGE_LENGTH-100]
+                        
+                        # Try to break at a paragraph
+                        last_newline = truncated.rfind('\n\n')
+                        if last_newline > MAX_MESSAGE_LENGTH * 0.8:  # If we can keep at least 80% of the text
+                            truncated = truncated[:last_newline]
+                            
+                        # Add indicator that text was truncated
+                        truncated += "\n\n<i>... (message truncated)</i>"
+                        
+                        # Use truncated text for new message
+                        await query.bot.send_message(
+                            chat_id=chat_id,
+                            text=truncated,
+                            reply_markup=keyboard,
+                            parse_mode=parse_mode
+                        )
+                    else:
+                        # Message is within limits
+                        await query.bot.send_message(
+                            chat_id=chat_id,
+                            text=text,
+                            reply_markup=keyboard,
+                            parse_mode=parse_mode
+                        )
                     return True
                 except Exception as e3:
                     logger.error(f"Failed to send new message: {str(e3)}")

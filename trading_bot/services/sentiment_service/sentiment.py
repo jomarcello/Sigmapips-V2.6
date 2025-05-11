@@ -156,41 +156,25 @@ class MarketSentimentService:
                 messages=[
                     {
                         'role': 'system',
-                        'content': f'''You are an expert financial market analyst with web search capabilities. Your task is to provide an extensive {market} sentiment analysis for May 1-8, 2025:
+                        'content': f'''You are an expert financial market analyst. Your task is to provide a concise {market} sentiment analysis:
 
-1. COMPREHENSIVE FUNDAMENTAL ANALYSIS:
-   - Economic Data (GDP, CPI, Retail Sales, PMIs) with exact figures
-   - Interest Rate Differentials and central bank commentary
-   - Political Developments with market impact
-   - Quantitative metrics with exact dates (YYYY-MM-DD) and historical context
+1. SENTIMENT CALCULATION:
+   - Provide a clear overall sentiment: bullish, bearish, or neutral
+   - Include percentage breakdown that sums to 100%
+   - Use a confidence score from 0.0-1.0
 
-2. DETAILED NEWS SYNTHESIS:
-   - Thorough analysis of all relevant articles from Financial Times, Bloomberg, Reuters, WSJ
-   - Comprehensive narrative connecting:
-     * Economic releases with exact figures and market reactions
-     * Policy changes with expert commentary
-     * Intermarket relationships and capital flows
-     * Technical levels and trading volumes
-   - Must include:
-     * Key statistics and data points
-     * Market reactions with percentage moves
-     * Analyst opinions and forecasts
+2. KEY DRIVERS (3-5 only):
+   - List the most important factors affecting the market
+   - Each with a brief description (1-2 sentences maximum)
+   - Assign an impact score (1-10)
 
-3. TECHNICAL ANALYSIS:
-   - Key support/resistance levels
-   - Moving averages
-   - RSI and MACD indicators
-   - Volume analysis
+3. MARKET SUMMARY:
+   - Brief overview of current market conditions (2-3 sentences)
+   - Focus only on the most relevant information
 
-4. SENTIMENT CALCULATION:
-   - Weighting: 50% fundamentals, 30% technicals, 20% news
-   - Breakdown percentages with detailed justification
-   - Confidence score based on data quality
-
-5. OUTPUT FORMAT (STRICT JSON):
+4. OUTPUT FORMAT (STRICT VALID JSON):
 {{
   "overall_sentiment": "bullish/neutral/bearish",
-  "sentiment_score": -1.0 to 1.0,
   "percentage_breakdown": {{
     "bullish": 0-100,
     "bearish": 0-100,
@@ -198,36 +182,27 @@ class MarketSentimentService:
   }},
   "key_drivers": [
     {{
-      "factor": "string",
-      "value": "string",
-      "date": "YYYY-MM-DD",
-      "impact": 1-10,
-      "description": "string"
+      "factor": "Brief name",
+      "description": "Short description",
+      "importance": "high/medium/low"
     }}
   ],
-  "news_summary": "A comprehensive narrative synthesizing all relevant news articles with quantitative data points and market impacts",
-  "technical_analysis": {{
-    "key_levels": ["string"],
-    "indicators": ["string"],
-    "chart_patterns": ["string"]
-  }},
-  "confidence_score": 0.0-1.0,
-  "sentiment_emoji": "string"
+  "market_summary": "Brief market summary"
 }}'''
                     },
                     {
                         'role': 'user',
-                        'content': f'''Provide professional-grade sentiment analysis for {market} ({market_type}) including:
-1. Quantitative fundamental analysis (last 24h data)
-2. Detailed technical analysis with indicators
-3. Market sentiment metrics
-4. News impact analysis with scores
-5. Clear justification for sentiment percentages'''
+                        'content': f'''Provide a concise sentiment analysis for {market} ({market_type}) with:
+1. Overall sentiment (bullish/bearish/neutral)
+2. Percentage breakdown (must sum to 100%)
+3. 3-5 key drivers with brief descriptions
+4. Short market summary (2-3 sentences maximum)
+5. Return ONLY valid JSON'''
                     }
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.1,  # More deterministic
-                max_tokens=2000
+                max_tokens=1000   # Reduced token count for more concise responses
             )
 
             if response.choices[0].message.content:
@@ -238,8 +213,15 @@ class MarketSentimentService:
                     full_response = response.choices[0].message.content
                     self.logger.info(f"FULL RESPONSE: {full_response}")
                     
-                    result = json.loads(full_response)
-                    self.logger.info(f"Successfully parsed JSON response for {market}")
+                    # Clean up potential JSON issues
+                    cleaned_response = self._clean_json_response(full_response)
+                    
+                    try:
+                        result = json.loads(cleaned_response)
+                        self.logger.info(f"Successfully parsed JSON response for {market}")
+                    except json.JSONDecodeError:
+                        self.logger.error(f"Still failed to parse JSON after cleaning, using fallback")
+                        return await self._construct_default_analysis(market)
                     
                     # Log the overall sentiment and percentages
                     sentiment = result.get('overall_sentiment', 'unknown')
@@ -282,17 +264,14 @@ class MarketSentimentService:
                         result['key_drivers'] = [
                             {
                                 "factor": "Market Analysis",
-                                "value": "Recent data",
-                                "date": "2025-05-11",
-                                "impact": 5,
-                                "description": "Based on recent market data"
+                                "description": "Based on recent market data",
+                                "importance": "medium"
                             }
                         ]
                     
-                    if 'confidence_score' not in result:
-                        result['confidence_score'] = 0.7
-                    
-                    # Don't validate dates - accept whatever we get
+                    # Limit key drivers to 5 maximum to keep message size manageable
+                    if 'key_drivers' in result and len(result['key_drivers']) > 5:
+                        result['key_drivers'] = result['key_drivers'][:5]
                     
                     return result
                 except json.JSONDecodeError as e:
@@ -311,7 +290,23 @@ class MarketSentimentService:
             self.logger.error(f"OpenAI API error for {market}: {str(e)}")
             self.logger.error(f"Exception details: {traceback.format_exc()}")
             return await self._construct_default_analysis(market)
-    
+            
+    def _clean_json_response(self, response_text):
+        """
+        Attempt to clean and fix common JSON formatting issues
+        """
+        # Remove any markdown code block markers
+        response_text = response_text.replace('```json', '').replace('```', '')
+        
+        # Try to extract just the JSON part if there's text before or after
+        json_start = response_text.find('{')
+        json_end = response_text.rfind('}')
+        
+        if json_start >= 0 and json_end >= 0:
+            response_text = response_text[json_start:json_end+1]
+            
+        return response_text
+        
     async def _construct_default_analysis(self, market: str) -> Dict:
         """
         Construct a default analysis structure when actual data is unavailable
@@ -327,7 +322,6 @@ class MarketSentimentService:
         # Use different percentages than the standard mock to make it obvious
         mock_data = {
             "overall_sentiment": "neutral",
-            "sentiment_score": 0.05,
             "percentage_breakdown": {
                 "bullish": 45,  # Changed from 40
                 "bearish": 35,   # Changed from 40
@@ -336,51 +330,25 @@ class MarketSentimentService:
             "_source": "mock_data",  # Clear marker that this is mock data
             "key_drivers": [
                 {
-                    "factor": "US Non-Farm Payrolls",
-                    "value": "+190K (May 2025)",
-                    "date": "2025-05-07",
-                    "impact_score": 8
+                    "factor": "Economic Data",
+                    "description": "Recent economic indicators show mixed signals with no clear directional bias.",
+                    "importance": "high"
                 },
                 {
-                    "factor": "UK CPI",
-                    "value": "2.9% y/y (May 2025)",
-                    "date": "2025-05-05",
-                    "impact_score": 7
+                    "factor": "Central Bank Policy",
+                    "description": "Monetary policy remains accommodative with no significant changes expected in the near term.",
+                    "importance": "high"
                 },
                 {
-                    "factor": "Bank of England Rate Decision",
-                    "value": "Held at 4.25%",
-                    "date": "2025-05-08",
-                    "impact_score": 6
+                    "factor": "Market Sentiment",
+                    "description": "Traders remain cautious with balanced positioning in the current market environment.",
+                    "importance": "medium"
                 }
             ],
-            "news_summary": "Recent market developments (May 1-8, 2025) show mixed signals for GBP/USD. The Financial Times (May 8) reported the Bank of England maintained rates at 4.25% amid stable inflation, while Bloomberg (May 7) noted US job growth of 190K, slightly below expectations. Reuters (May 6) highlighted UK inflation holding steady at 2.9%, creating a balanced fundamental picture.",
-            "overall_news_impact": 6,
-            "confidence_score": 0.8,
-            "sentiment_emoji": "⚪️",
-            "search_queries": [
-                f"{market} economic data May 2025",
-                f"{market} interest rate decisions May 2025",
-                f"{market} employment data May 2025",
-                f"{market} inflation reports May 2025"
-            ]
+            "market_summary": f"The {market} pair is currently trading in a consolidation pattern with no clear directional bias. Technical indicators are neutral, and economic data has provided mixed signals. Traders are advised to wait for clearer market direction before establishing positions."
         }
         
         return mock_data
-
-    def _save_cache(self) -> None:
-        """
-        Save the cache to file if persistent caching is enabled
-        """
-        if self.persistent_cache:
-            try:
-                with open(self.cache_file, 'w') as f:
-                    json.dump(self.sentiment_cache, f)
-            except Exception as e:
-                self.logger.error(f"Failed to save cache: {str(e)}")
-
-    def __repr__(self) -> str:
-        return f"MarketSentimentService(cached_data_count={len(self.sentiment_cache)}, fast_mode={self.fast_mode})"
         
     async def get_telegram_sentiment(self, instrument):
         """Get sentiment analysis formatted specifically for Telegram with rich emoji formatting"""
@@ -408,12 +376,53 @@ class MarketSentimentService:
                 neutral_pct
             )
             
+            # Ensure the text isn't too long for Telegram
+            formatted_text = self._truncate_for_telegram(formatted_text)
+            
             self.logger.info(f"Successfully formatted sentiment for {instrument}")
             return formatted_text
         except Exception as e:
             self.logger.error(f"Error in get_telegram_sentiment for {instrument}: {str(e)}")
             return f"<b>🎯 {instrument} Market Analysis</b>\n\n⚠️ Error retrieving sentiment data: {str(e)}"
-    
+            
+    def _truncate_for_telegram(self, text):
+        """
+        Ensure text isn't too long for Telegram caption limits (1024 chars)
+        """
+        MAX_CAPTION_LENGTH = 1000  # Slightly under the 1024 limit for safety
+        
+        if len(text) <= MAX_CAPTION_LENGTH:
+            return text
+            
+        self.logger.warning(f"Message too long ({len(text)} chars), truncating to {MAX_CAPTION_LENGTH} chars")
+        
+        # Find a good breaking point
+        truncated = text[:MAX_CAPTION_LENGTH]
+        
+        # Try to break at a paragraph
+        last_newline = truncated.rfind('\n\n')
+        if last_newline > MAX_CAPTION_LENGTH * 0.8:  # If we can keep at least 80% of the text
+            truncated = truncated[:last_newline]
+            
+        # Add indicator that text was truncated
+        truncated += "\n\n<i>... (message truncated)</i>"
+        
+        return truncated
+
+    def _save_cache(self) -> None:
+        """
+        Save the cache to file if persistent caching is enabled
+        """
+        if self.persistent_cache:
+            try:
+                with open(self.cache_file, 'w') as f:
+                    json.dump(self.sentiment_cache, f)
+            except Exception as e:
+                self.logger.error(f"Failed to save cache: {str(e)}")
+
+    def __repr__(self) -> str:
+        return f"MarketSentimentService(cached_data_count={len(self.sentiment_cache)}, fast_mode={self.fast_mode})"
+        
     def _format_compact_sentiment_text(self, instrument, bullish_pct, bearish_pct, neutral_pct=None):
         """
         Format sentiment in compact text format suitable for Telegram
