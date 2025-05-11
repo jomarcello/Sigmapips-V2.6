@@ -4541,37 +4541,48 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
             return f"New {signal_data.get('instrument', 'Unknown')} {signal_data.get('direction', 'Unknown')} Signal"
 
     async def _load_signals(self):
-        """Load and cache previously saved signals"""
+        """Load stored signals from the database"""
         try:
-            # Initialize user_signals dictionary if it doesn't exist
-            if not hasattr(self, 'user_signals'):
+            self.logger.info("Loading stored signals")
+            
+            try:
+                # Check if the get_active_signals method exists on the database object
+                if hasattr(self.db, 'get_active_signals'):
+                    signals = await self.db.get_active_signals()
+                    self.logger.info(f"Found {len(signals)} active signals")
+                    
+                    # Process each signal
+                    for signal in signals:
+                        # Check necessary fields
+                        if 'user_id' in signal and 'market' in signal and 'instrument' in signal:
+                            user_id = signal['user_id']
+                            market = signal['market']
+                            instrument = signal['instrument']
+                            
+                            # Add to user_signals dictionary
+                            if user_id not in self.user_signals:
+                                self.user_signals[user_id] = {}
+                            if market not in self.user_signals[user_id]:
+                                self.user_signals[user_id][market] = []
+                            
+                            # Add instrument if not already in list
+                            if instrument not in self.user_signals[user_id][market]:
+                                self.user_signals[user_id][market].append(instrument)
+                else:
+                    self.logger.warning("Database does not have get_active_signals method - signals won't be loaded")
+                    # Initialize empty user_signals dict
+                    self.user_signals = {}
+            except AttributeError:
+                self.logger.warning("Database missing get_active_signals method - falling back to empty signals")
+                # Initialize empty user_signals dict
                 self.user_signals = {}
                 
-            # If we have a database connection, load signals from there
-            if self.db:
-                # Get all active signals from the database
-                signals = await self.db.get_active_signals()
-                
-                # Organize signals by user_id for quick access
-                for signal in signals:
-                    user_id = str(signal.get('user_id'))
-                    signal_id = signal.get('id')
-                    
-                    # Initialize user dictionary if needed
-                    if user_id not in self.user_signals:
-                        self.user_signals[user_id] = {}
-                    
-                    # Store the signal
-                    self.user_signals[user_id][signal_id] = signal
-                
-                logger.info(f"Loaded {len(signals)} signals for {len(self.user_signals)} users")
-            else:
-                logger.warning("No database connection available for loading signals")
-                
+            self.logger.info("Signals loaded")
+            
         except Exception as e:
-            logger.error(f"Error loading signals: {str(e)}")
-            logger.exception(e)
-            # Initialize empty dict on error
+            self.logger.error(f"Error loading signals: {str(e)}")
+            self.logger.exception(e)
+            # Initialize empty user_signals dict in case of error
             self.user_signals = {}
 
     async def back_signals_callback(self, update: Update, context=None) -> int:
@@ -5132,8 +5143,8 @@ To continue using Sigmapips AI and receive trading signals, please reactivate yo
                 await self.application.updater.start_polling(drop_pending_updates=True)
                 logger.info("Bot polling started")
                 
-                # Run until stopped
-                await self.application.updater.idle()
+                # Run until stopped - FIX: Use application.idle() instead of updater.idle()
+                await self.application.idle()
                 logger.info("Bot stopped")
                 
             else:
@@ -5168,7 +5179,8 @@ if __name__ == "__main__":
         stripe_service = None
         try:
             from trading_bot.services.payment_service.stripe_service import StripeService
-            stripe_service = StripeService()
+            # Pass the database to StripeService
+            stripe_service = StripeService(db=db)
             logger.info("Stripe service initialized")
         except Exception as e:
             logger.error(f"Failed to initialize Stripe service: {str(e)}")
