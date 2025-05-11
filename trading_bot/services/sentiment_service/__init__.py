@@ -91,31 +91,16 @@ class MarketSentimentService:
     async def get_telegram_sentiment(self, instrument):
         """Get sentiment analysis formatted specifically for Telegram with rich emoji formatting"""
         try:
-            from trading_bot.services.ai_service.tavily_service import TavilyService
             # Get sentiment data
             sentiment_data = await self.get_market_sentiment(instrument)
             
-            # Check if we have the required data
-            if isinstance(sentiment_data, dict) and 'overall_sentiment' in sentiment_data:
-                # If we have a Tavily service, use its formatting method
-                try:
-                    tavily_service = TavilyService()
-                    formatted_text = tavily_service.format_telegram_sentiment(sentiment_data, instrument)
-                    return formatted_text
-                except Exception as e:
-                    logger.error(f"Error formatting Telegram sentiment: {str(e)}")
-                    # Fall back to standard formatting
-                    return self._format_compact_sentiment_text(
-                        instrument, 
-                        sentiment_data.get('bullish_percentage', 50), 
-                        sentiment_data.get('bearish_percentage', 30),
-                        sentiment_data.get('neutral_percentage', 20)
-                    )
-            else:
-                # Use the compact format as a fallback
-                return sentiment_data.get('analysis', self._format_compact_sentiment_text(
-                    instrument, 50, 30, 20
-                ))
+            # Format the sentiment data for Telegram
+            return self._format_compact_sentiment_text(
+                instrument, 
+                sentiment_data.get('bullish_percentage', 50), 
+                sentiment_data.get('bearish_percentage', 30),
+                sentiment_data.get('neutral_percentage', 20)
+            )
         except Exception as e:
             logger.error(f"Error in get_telegram_sentiment: {str(e)}")
             return f"<b>🎯 {instrument} Market Analysis</b>\n\n⚠️ Error retrieving sentiment data: {str(e)}"
