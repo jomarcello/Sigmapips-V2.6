@@ -46,23 +46,27 @@ if AI_SERVICES_ENABLED:
         try:
             from trading_bot.services.calendar_service.forexfactory_screenshot import ForexFactoryScreenshotService
             HAS_SCREENSHOT_SERVICE = True
-        except ImportError:
+        except ImportError as e:
+            logger = logging.getLogger(__name__)
+            logger.warning(f"ForexFactoryScreenshotService could not be loaded: {str(e)}")
             HAS_SCREENSHOT_SERVICE = False
         try:
             from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
             HAS_TRADINGVIEW_SERVICE = True
-        except ImportError:
+        except ImportError as e:
+            logger = logging.getLogger(__name__)
+            logger.warning(f"TradingViewCalendarService could not be loaded: {str(e)}")
             HAS_TRADINGVIEW_SERVICE = False
         HAS_AI_SERVICES = True
-    except ImportError:
+    except ImportError as e:
         logger = logging.getLogger(__name__)
-        logger.warning("AI services not available. Using fallback implementations.")
+        logger.warning(f"AI services not available. Using fallback implementations. Error: {str(e)}")
         HAS_AI_SERVICES = False
         HAS_SCREENSHOT_SERVICE = False
         HAS_TRADINGVIEW_SERVICE = False
 else:
     logger = logging.getLogger(__name__)
-    logger.warning("AI services not available. Using fallback implementations.")
+    logger.warning("AI services not available. Using fallback implementations. OpenAI API key validation failed.")
     HAS_AI_SERVICES = False
     HAS_SCREENSHOT_SERVICE = False
     HAS_TRADINGVIEW_SERVICE = False

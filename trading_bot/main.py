@@ -598,10 +598,16 @@ TAVILY_API_KEY = ""
 
 # Log OpenAI API key (partially masked)
 if OPENAI_API_KEY:
-    masked_key = f"{OPENAI_API_KEY[:4]}...{OPENAI_API_KEY[-4:]}" if len(OPENAI_API_KEY) > 8 else f"{OPENAI_API_KEY[:2]}..."
+    # Better masking for privacy and security
+    masked_key = f"sk-p...{OPENAI_API_KEY[-4:]}" if len(OPENAI_API_KEY) > 8 else "sk-p..."
     logger.info(f"Using OpenAI API key: {masked_key}")
+    
+    # Validate the key format
+    from trading_bot.config import validate_openai_key
+    if not validate_openai_key(OPENAI_API_KEY):
+        logger.warning("OpenAI API key format is invalid. AI services may not work correctly.")
 else:
-    logger.warning("No OpenAI API key configured")
+    logger.warning("No OpenAI API key configured. AI services will be disabled.")
     
 # Set environment variables for the API keys with sanitization
 os.environ["PERPLEXITY_API_KEY"] = PERPLEXITY_API_KEY
