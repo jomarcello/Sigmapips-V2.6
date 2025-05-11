@@ -41,32 +41,66 @@ from trading_bot.config import AI_SERVICES_ENABLED
 # Try to import AI services, but provide fallbacks if AI services are disabled
 if AI_SERVICES_ENABLED:
     try:
-        from trading_bot.services.ai_service.tavily_service import TavilyService
-        from trading_bot.services.ai_service.deepseek_service import DeepseekService
+        logger = logging.getLogger(__name__)
+        logger.info("AI_SERVICES_ENABLED is True, attempting to import AI services")
+        
+        # Check if OPENAI_API_KEY is set
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
+        if not openai_key:
+            logger.warning("OPENAI_API_KEY is not set in environment variables")
+        else:
+            masked_key = f"sk-...{openai_key[-4:]}" if len(openai_key) > 8 else "sk-..."
+            logger.info(f"OPENAI_API_KEY is set in environment: {masked_key}")
+        
+        # Import Tavily service
+        try:
+            from trading_bot.services.ai_service.tavily_service import TavilyService
+            logger.info("Successfully imported TavilyService")
+        except ImportError as e:
+            logger.error(f"Failed to import TavilyService: {str(e)}")
+            raise ImportError(f"Failed to import TavilyService: {str(e)}")
+        
+        # Import DeepSeek service
+        try:
+            from trading_bot.services.ai_service.deepseek_service import DeepseekService
+            logger.info("Successfully imported DeepseekService")
+        except ImportError as e:
+            logger.error(f"Failed to import DeepseekService: {str(e)}")
+            raise ImportError(f"Failed to import DeepseekService: {str(e)}")
+        
+        # Now try to import calendar-specific services
         try:
             from trading_bot.services.calendar_service.forexfactory_screenshot import ForexFactoryScreenshotService
             HAS_SCREENSHOT_SERVICE = True
+            logger.info("Successfully imported ForexFactoryScreenshotService")
         except ImportError as e:
             logger = logging.getLogger(__name__)
             logger.warning(f"ForexFactoryScreenshotService could not be loaded: {str(e)}")
             HAS_SCREENSHOT_SERVICE = False
+        
         try:
             from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
             HAS_TRADINGVIEW_SERVICE = True
+            logger.info("Successfully imported TradingViewCalendarService")
         except ImportError as e:
             logger = logging.getLogger(__name__)
             logger.warning(f"TradingViewCalendarService could not be loaded: {str(e)}")
             HAS_TRADINGVIEW_SERVICE = False
+        
+        # If we reach here, all required AI services are imported
         HAS_AI_SERVICES = True
+        logger.info("Successfully loaded all required AI services")
+        
     except ImportError as e:
         logger = logging.getLogger(__name__)
-        logger.warning(f"AI services not available. Using fallback implementations. Error: {str(e)}")
+        logger.error(f"AI services not available. Using fallback implementations. Error: {str(e)}")
+        logger.error(f"Import error traceback: {traceback.format_exc()}")
         HAS_AI_SERVICES = False
         HAS_SCREENSHOT_SERVICE = False
         HAS_TRADINGVIEW_SERVICE = False
 else:
     logger = logging.getLogger(__name__)
-    logger.warning("AI services not available. Using fallback implementations. OpenAI API key validation failed.")
+    logger.warning("AI services not available. Using fallback implementations. AI_SERVICES_ENABLED is set to False.")
     HAS_AI_SERVICES = False
     HAS_SCREENSHOT_SERVICE = False
     HAS_TRADINGVIEW_SERVICE = False

@@ -1,3 +1,93 @@
+# Import necessary modules for improved logging
+import os
+import sys
+import json
+import logging
+import logging.config
+from datetime import datetime
+
+# Setup detailed logging configuration
+def setup_logging(log_level=None):
+    """Configure structured logging for the application"""
+    log_level = log_level or os.environ.get("LOG_LEVEL", "INFO").upper()
+    
+    # Create logs directory if it doesn't exist
+    os.makedirs("logs", exist_ok=True)
+    
+    # Generate a log filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = f"logs/trading_bot_{timestamp}.log"
+    
+    # Define logging configuration
+    logging_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "standard": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            },
+            "detailed": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": log_level,
+                "formatter": "standard",
+                "stream": "ext://sys.stdout"
+            },
+            "file": {
+                "class": "logging.FileHandler",
+                "level": "DEBUG",
+                "formatter": "detailed",
+                "filename": log_file,
+                "encoding": "utf8"
+            }
+        },
+        "loggers": {
+            "": {  # Root logger
+                "handlers": ["console", "file"],
+                "level": "DEBUG",
+                "propagate": True
+            },
+            "trading_bot": {
+                "handlers": ["console", "file"],
+                "level": "DEBUG",
+                "propagate": False
+            },
+            "trading_bot.services": {
+                "handlers": ["console", "file"],
+                "level": "DEBUG",
+                "propagate": False
+            }
+        }
+    }
+    
+    # Apply the configuration
+    logging.config.dictConfig(logging_config)
+    
+    # Log startup information
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging configured with level {log_level}, writing to {log_file}")
+    logger.info(f"Python version: {sys.version}")
+    logger.info(f"Running on platform: {sys.platform}")
+    
+    # Log environment variables (excluding sensitive information)
+    safe_env = {}
+    for key, value in os.environ.items():
+        if any(sensitive in key.lower() for sensitive in ['key', 'token', 'secret', 'password', 'pwd']):
+            safe_env[key] = f"{value[:3]}...{value[-3:]}" if len(value) > 6 else "[REDACTED]"
+        else:
+            safe_env[key] = value
+    
+    logger.debug(f"Environment variables: {json.dumps(safe_env, indent=2)}")
+    
+    return logger
+
+# Initialize logging early in the application startup
+logger = setup_logging()
+
 import os
 import json
 import asyncio
