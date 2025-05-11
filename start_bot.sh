@@ -36,14 +36,21 @@ fi
 
 echo "Using Python command: $PYTHON_COMMAND"
 
-# Stop any existing bot instances
-echo "Stopping any existing bot instances..."
-$PYTHON_COMMAND stop_existing_bots.py
-
 # Create log directory if it doesn't exist
 if [ ! -d "logs" ]; then
     mkdir -p logs
     echo "Logs directory created."
+fi
+
+# Stop any existing bot instances - run with increased timeout
+echo "Stopping any existing bot instances..."
+$PYTHON_COMMAND stop_existing_bots.py
+
+# Check if the stop script was successful
+if [ $? -ne 0 ]; then
+    echo "Warning: There was an issue stopping existing bot instances."
+    echo "Waiting 10 seconds before continuing to ensure all processes are terminated..."
+    sleep 10
 fi
 
 # Continue with virtual environment setup
@@ -69,6 +76,16 @@ fi
 echo "Dependencies installeren/updaten..."
 pip install -r requirements.txt
 
+# Verify critical packages are installed
+echo "Verifying critical dependencies..."
+python -c "import telegram" 2>/dev/null || { echo "Error: python-telegram-bot package is not properly installed!"; exit 1; }
+python -c "import httpx" 2>/dev/null || { echo "Error: httpx package is not properly installed!"; exit 1; }
+python -c "import psutil" 2>/dev/null || { echo "Error: psutil package is not properly installed!"; exit 1; }
+
+# Run the stop script one more time to be absolutely sure
+echo "Running final check to ensure no other bot instances are running..."
+python stop_existing_bots.py
+
 # Start de bot
 echo "======================================================"
 echo "          SIGMAPIPS TRADING BOT STARTEN               "
@@ -76,4 +93,4 @@ echo "======================================================"
 python -m trading_bot.main
 
 # Deactiveer virtuele omgeving (wordt alleen bereikt als bot wordt afgesloten)
-deactivate 
+deactivate

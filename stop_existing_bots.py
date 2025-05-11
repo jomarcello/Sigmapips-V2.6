@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # File to store the lock information
 LOCK_FILE = '/tmp/telegbot_instance.lock'
-BOT_TOKEN = os.environ.get('BOT_TOKEN') or '7328581013:AAGDFJyvipmQsV5UQLjUeLQmX2CWIU2VMjk'
+BOT_TOKEN = os.environ.get('BOT_TOKEN') or os.environ.get('TELEGRAM_BOT_TOKEN') or '7328581013:AAGDFJyvipmQsV5UQLjUeLQmX2CWIU2VMjk'
 
 def get_bot_token_from_env():
     """Get bot token from environment variable"""
@@ -48,34 +48,55 @@ async def clear_telegram_sessions(bot_token=None):
         async with httpx.AsyncClient() as client:
             response = await client.post(webhook_url)
             logger.info(f"Webhook info response: {response.status_code}")
+            
+            # If webhook is set, delete it
+            webhook_data = response.json()
+            if webhook_data.get('result', {}).get('url'):
+                logger.info(f"Found webhook URL: {webhook_data['result']['url']}, deleting...")
+                delete_url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook?drop_pending_updates=true"
+                delete_response = await client.post(delete_url)
+                logger.info(f"Delete webhook response: {delete_response.status_code}")
         
         # Then send a dummy getUpdates request with minimal timeout to clear any sessions
         logger.info("Sending dummy getUpdates request to clear sessions...")
         updates_url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
         async with httpx.AsyncClient() as client:
+            # First try to clear with offset=-1
             params = {'timeout': 1, 'offset': -1, 'limit': 1}
             response = await client.post(updates_url, params=params)
-            logger.info("Dummy getUpdates request completed")
+            logger.info(f"Dummy getUpdates request completed: {response.status_code}")
+            
+            # Then try with explicit drop_pending_updates
+            params = {'timeout': 1, 'offset': -1, 'limit': 1, 'drop_pending_updates': True}
+            response = await client.post(updates_url, params=params)
+            logger.info(f"Dummy getUpdates with drop_pending_updates completed: {response.status_code}")
         
         # Wait a moment to ensure sessions are cleared
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
         
         return True
     except Exception as e:
         logger.error(f"Error clearing Telegram sessions: {str(e)}")
         return False
 
-def kill_process(pid):
+def kill_process(pid, force=False):
     """Kill a process by PID"""
     try:
+        if force:
+            os.kill(pid, signal.SIGKILL)
+            logger.info(f"Force killed process {pid}")
+            return True
+        
         os.kill(pid, signal.SIGTERM)
         time.sleep(0.5)
         # Check if the process is still running
         if psutil.pid_exists(pid):
             # If still running, force kill
             os.kill(pid, signal.SIGKILL)
+            logger.info(f"Process {pid} did not terminate with SIGTERM, sent SIGKILL")
         return True
     except ProcessLookupError:
+        logger.info(f"Process {pid} not found")
         return False
     except Exception as e:
         logger.error(f"Error killing process {pid}: {str(e)}")
@@ -85,15 +106,18 @@ def find_bot_processes():
     """Find all running Python processes that might be running our bot"""
     bot_processes = []
     
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+    # More aggressive search for bot processes
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'username']):
         try:
-            # Look for Python processes running our bot
-            if proc.info['name'] and 'python' in proc.info['name'].lower():
+            # Look for Python processes
+            if proc.info['name'] and ('python' in proc.info['name'].lower() or 'python3' in proc.info['name'].lower()):
                 if proc.info['cmdline']:
                     cmdline = ' '.join(proc.info['cmdline'])
-                    if 'trading_bot' in cmdline and 'main.py' in cmdline:
+                    # Check for various indicators of our bot
+                    if any(keyword in cmdline for keyword in ['trading_bot', 'main.py', 'telegram', 'bot', 'sigmapips']):
                         # Don't include our own PID
                         if proc.info['pid'] != os.getpid():
+                            logger.info(f"Found potential bot process: {proc.info['pid']} with command: {cmdline[:100]}...")
                             bot_processes.append(proc.info['pid'])
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
@@ -142,7 +166,7 @@ async def main():
     locked_pid = check_lock_file()
     if locked_pid:
         logger.info(f"Found running bot instance with PID {locked_pid}")
-        if kill_process(locked_pid):
+        if kill_process(locked_pid, force=True):
             logger.info(f"Successfully terminated bot process with PID {locked_pid}")
         else:
             logger.warning(f"Failed to terminate bot process with PID {locked_pid}")
@@ -152,7 +176,7 @@ async def main():
     if bot_processes:
         logger.info(f"Found {len(bot_processes)} bot processes: {bot_processes}")
         for pid in bot_processes:
-            if kill_process(pid):
+            if kill_process(pid, force=True):
                 logger.info(f"Successfully terminated bot process with PID {pid}")
             else:
                 logger.warning(f"Failed to terminate bot process with PID {pid}")
@@ -162,6 +186,10 @@ async def main():
     # Clear any Telegram API sessions
     logger.info("Attempting to clear Telegram API sessions...")
     await clear_telegram_sessions()
+    
+    # Wait a bit to ensure everything is cleared
+    logger.info("Waiting for 5 seconds to ensure all processes are terminated...")
+    await asyncio.sleep(5)
     
     # Create a new lock file
     create_lock_file()
