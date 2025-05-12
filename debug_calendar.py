@@ -18,13 +18,13 @@ logger = logging.getLogger(__name__)
 
 async def main():
     try:
-        # Import the calendar service
-        logger.info("Importing calendar service...")
-        from trading_bot.services.calendar_service.calendar import EconomicCalendarService
+        # Import the calendar service directly
+        logger.info("Importing TradingViewCalendarService...")
+        from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
         
         # Create an instance of the calendar service
-        logger.info("Creating EconomicCalendarService instance...")
-        calendar_service = EconomicCalendarService()
+        logger.info("Creating TradingViewCalendarService instance...")
+        calendar_service = TradingViewCalendarService()
         
         # Log environment variables
         logger.info("Environment variables:")
@@ -46,13 +46,16 @@ async def main():
         else:
             logger.info("No events retrieved")
         
-        # Try to get the raw response from TradingView
-        logger.info("Directly accessing TradingView calendar service...")
-        tradingview_service = calendar_service.calendar_service
+        # Format the calendar for Telegram
+        logger.info("Formatting calendar for Telegram...")
+        from trading_bot.services.calendar_service.tradingview_calendar import format_calendar_for_telegram
+        formatted_calendar = await format_calendar_for_telegram(events)
+        logger.info(f"Formatted calendar length: {len(formatted_calendar)} characters")
+        logger.info(f"First 200 characters of formatted calendar: {formatted_calendar[:200]}...")
         
         # Run a debug check on the API connection
         logger.info("Running API connection debug...")
-        debug_info = await tradingview_service.debug_api_connection()
+        debug_info = await calendar_service.debug_api_connection()
         logger.info(f"API health: {debug_info.get('api_health')}")
         logger.info(f"Events retrieved: {debug_info.get('events_retrieved')}")
         

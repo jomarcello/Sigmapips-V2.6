@@ -221,10 +221,13 @@ class TradingViewCalendarService:
         query_string = urllib.parse.urlencode(params)
         full_url = f"{url}?{query_string}"
         
+        # Log the API key to verify it's not empty
+        masked_key = f"{self.scrapingant_api_key[:5]}...{self.scrapingant_api_key[-3:]}" if len(self.scrapingant_api_key) > 8 else "[masked]"
+        logger.info(f"Using ScrapingAnt API key: {masked_key}")
+        
         # Bereid ScrapingAnt request parameters voor
         scrapingant_params = {
             "url": full_url,
-            "x-api-key": self.scrapingant_api_key,
             "browser": True,
             "return_page_source": True,
             "headers": {
@@ -241,9 +244,13 @@ class TradingViewCalendarService:
         # Maak request naar ScrapingAnt
         await self._ensure_session()
         try:
+            # Add API key to headers instead of body
+            headers = {"x-api-key": self.scrapingant_api_key}
+            
             async with self.session.post(
                 self.scrapingant_url,
                 json=scrapingant_params,
+                headers=headers,
                 timeout=aiohttp.ClientTimeout(total=60)
             ) as response:
                 logger.info(f"ScrapingAnt response status: {response.status}")
@@ -323,7 +330,7 @@ class TradingViewCalendarService:
             
             logger.info(f"Requesting calendar with params: {params}")
             
-            # Altijd directe API aanroep proberen omdat dit beter werkt
+            # Always try direct API first as this is more reliable
             logger.info("Making direct API request to TradingView")
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
@@ -342,29 +349,44 @@ class TradingViewCalendarService:
             
             # Use a longer timeout to prevent hanging
             timeout = aiohttp.ClientTimeout(total=30)
-            async with self.session.get(full_url, params=params, headers=headers, timeout=timeout) as response:
-                logger.info(f"Got response with status: {response.status}")
-                
-                if response.status != 200:
-                    logger.error(f"Error response from TradingView (status {response.status})")
-                    if response.status == 404:
-                        logger.error(f"404 Not Found error for URL: {full_url}?{urllib.parse.urlencode(params)}")
+            response_text = None
+            
+            # Try direct API first
+            try:
+                async with self.session.get(full_url, params=params, headers=headers, timeout=timeout) as response:
+                    logger.info(f"Got response with status: {response.status}")
                     
-                    # Als directe API aanroep faalt, genereer lege data
-                    logger.error("Failed to get data from direct API, returning empty list")
-                    return []
-                    
-                # Update the last successful call timestamp
-                self.last_successful_call = datetime.now()
-                
-                # Verwerk de response
-                response_text = await response.text()
-                
-                # Controleer of de API een geldige JSON-respons geeft
-                if not response_text or not (response_text.strip().startswith('[') or response_text.strip().startswith('{')):
-                    logger.error("API returned invalid or empty response")
-                    return []
-                
+                    if response.status == 200:
+                        # Update the last successful call timestamp
+                        self.last_successful_call = datetime.now()
+                        
+                        # Verwerk de response
+                        response_text = await response.text()
+                        
+                        # Controleer of de API een geldige JSON-respons geeft
+                        if response_text and (response_text.strip().startswith('[') or response_text.strip().startswith('{')):
+                            logger.info("Successfully got data from direct API")
+                        else:
+                            logger.error("API returned invalid or empty response")
+                            response_text = None
+                    else:
+                        logger.error(f"Error response from TradingView (status {response.status})")
+                        response_text = None
+            except Exception as e:
+                logger.error(f"Error making direct API request: {str(e)}")
+                response_text = None
+            
+            # Only try ScrapingAnt if direct API failed and ScrapingAnt is enabled
+            if response_text is None and self.use_scrapingant and self.scrapingant_api_key:
+                logger.info("Direct API request failed, trying ScrapingAnt")
+                try:
+                    response_text = await self._make_scrapingant_request(self.base_url, params)
+                except Exception as e:
+                    logger.error(f"Error making ScrapingAnt request: {str(e)}")
+                    response_text = None
+            
+            # Process the response if we have one
+            if response_text:
                 # Verwerk de respons en retourneer de gegevens
                 events = await self._process_response_text(response_text, min_impact, currency)
                 
@@ -372,11 +394,10 @@ class TradingViewCalendarService:
                 if events and len(events) > 0:
                     logger.info(f"Successfully processed {len(events)} calendar events")
                     return events
-                else:
-                    logger.warning("API returned valid response but no calendar events were found")
-                    # Gebruik terugval economische data op basis van de dag van de week
-                    logger.info("Generating fallback economic events based on day of week")
-                    return self._generate_fallback_events(currency)
+            
+            # If we got here, we couldn't get data or process it
+            logger.warning("Failed to get or process calendar events, using fallback")
+            return self._generate_fallback_events(currency)
                 
         except Exception as e:
             logger.error(f"Error fetching calendar data: {str(e)}")
@@ -805,6 +826,13 @@ async def format_calendar_for_telegram(events: List[Dict]) -> str:
         logger.warning("No events provided to format_calendar_for_telegram")
         return "<b>📅 Economic Calendar</b>\n\nNo economic events found for today."
     
+    # Define impact emojis
+    impact_emoji_map = {
+        "High": "🔴",
+        "Medium": "🟠",
+        "Low": "🟢"
+    }
+    
     # Count events per type
     logger.info(f"Formatting {len(events)} events for Telegram")
     event_counts = {"total": len(events), "valid": 0, "missing_fields": 0, "highlighted": 0}
@@ -862,7 +890,7 @@ async def format_calendar_for_telegram(events: List[Dict]) -> str:
                 time = event.get("time", "")
                 title = event.get("event", "")
                 impact = event.get("impact", "Low")
-                impact_emoji = IMPACT_EMOJI.get(impact, "🟢")
+                impact_emoji = impact_emoji_map.get(impact, "🟢")
                 
                 # Check if this event is highlighted (specific to the requested currency)
                 is_highlighted = event.get("highlighted", False)
