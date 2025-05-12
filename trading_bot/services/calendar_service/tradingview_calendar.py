@@ -105,22 +105,7 @@ class TradingViewCalendarService:
         # Keep track of last successful API call
         self.last_successful_call = None
         
-        # Check ScrapingAnt configuratie
-        self.use_scrapingant = os.environ.get("USE_SCRAPINGANT", "").lower() in ("true", "1", "yes")
-        self.scrapingant_api_key = os.environ.get("SCRAPINGANT_API_KEY", "")
-        
-        # Log ScrapingAnt configuratie
-        if self.use_scrapingant:
-            if self.scrapingant_api_key:
-                masked_key = f"{self.scrapingant_api_key[:5]}...{self.scrapingant_api_key[-3:]}" if len(self.scrapingant_api_key) > 8 else "[masked]"
-                logger.info(f"ScrapingAnt is enabled with API key: {masked_key}")
-            else:
-                logger.warning("ScrapingAnt is enabled but no API key is set")
-        else:
-            logger.info("ScrapingAnt is disabled, using direct API access")
-            
-        # ScrapingAnt API endpoint
-        self.scrapingant_url = "https://api.scrapingant.com/v2/general"
+        logger.info("TradingView Calendar Service initialized (direct API access)")
         
     async def _ensure_session(self):
         """Ensure we have an active aiohttp session"""
@@ -152,7 +137,7 @@ class TradingViewCalendarService:
                 'limit': 1
             }
             
-            # Add headers for better API compatibility - moderne user-agent en headers
+            # Add headers for better API compatibility
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
                 "Accept": "application/json, text/plain, */*",
@@ -164,25 +149,7 @@ class TradingViewCalendarService:
                 "Pragma": "no-cache"
             }
             
-            # Controleer of we ScrapingAnt moeten gebruiken
-            if self.use_scrapingant and self.scrapingant_api_key:
-                logger.info("Using ScrapingAnt for API health check")
-                try:
-                    # Gebruik de ScrapingAnt proxy voor de TradingView API gezondheidscheck
-                    response_text = await self._make_scrapingant_request(self.base_url, params)
-                    
-                    if response_text and (response_text.strip().startswith('[') or response_text.strip().startswith('{')):
-                        logger.info("API health check via ScrapingAnt succeeded")
-                        return True
-                    else:
-                        logger.error("API health check via ScrapingAnt returned invalid data")
-                        return False
-                except Exception as e:
-                    logger.error(f"ScrapingAnt API health check failed: {str(e)}")
-                    return False
-            
-            # Direct API call als ScrapingAnt niet wordt gebruikt
-            # Make request to TradingView
+            # Make direct API call to TradingView
             full_url = f"{self.base_url}"
             logger.info(f"Checking API health: {full_url}")
             
@@ -192,7 +159,7 @@ class TradingViewCalendarService:
                 logger.info(f"Health check response preview: {response_text[:100]}...")
                 
                 if response.status == 200:
-                    # Dubbel check dat de response daadwerkelijk JSON data bevat
+                    # Double check that the response actually contains JSON data
                     if response_text.strip().startswith('[') or response_text.strip().startswith('{'):
                         logger.info("API is healthy and returning valid JSON")
                         return True
@@ -209,150 +176,51 @@ class TradingViewCalendarService:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    async def _make_scrapingant_request(self, url: str, params: dict) -> str:
-        """Make a request using ScrapingAnt proxy service"""
-        if not self.scrapingant_api_key:
-            logger.error("No ScrapingAnt API key provided")
-            return None
-        
-        logger.info(f"Making ScrapingAnt request to {url}")
-        
-        # Bouw de volledige URL met query parameters
-        query_string = urllib.parse.urlencode(params)
-        full_url = f"{url}?{query_string}"
-        
-        # Log the full URL for debugging
-        logger.info(f"Full URL for ScrapingAnt request: {full_url}")
-        
-        # Log the API key to verify it's not empty
-        masked_key = f"{self.scrapingant_api_key[:5]}...{self.scrapingant_api_key[-3:]}" if len(self.scrapingant_api_key) > 8 else "[masked]"
-        logger.info(f"Using ScrapingAnt API key: {masked_key}")
-        
-        # Bereid ScrapingAnt request parameters voor - zorg dat 'url' correct is
-        scrapingant_params = {
-            "url": full_url,  # Use the full URL directly without encoding
-            "browser": True,
-            "return_page_source": True,
-            "headers": {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Origin": "https://www.tradingview.com",
-                "Referer": "https://www.tradingview.com/economic-calendar/"
-            }
-        }
-        
-        # Log de parameters voor debugging (zonder API key)
-        logger.info(f"ScrapingAnt parameters: {json.dumps(scrapingant_params, ensure_ascii=False)}")
-        
-        # Maak request naar ScrapingAnt
-        await self._ensure_session()
-        try:
-            # According to ScrapingAnt docs, the API key should be passed as a header
-            headers = {"x-api-key": self.scrapingant_api_key}
-            
-            # Validate the JSON request body before sending
-            try:
-                # Ensure the request body is valid JSON
-                request_json = json.dumps(scrapingant_params)
-                json.loads(request_json)  # Validate JSON
-                logger.info("ScrapingAnt request body validated as valid JSON")
-            except json.JSONDecodeError as je:
-                logger.error(f"Invalid JSON in ScrapingAnt request body: {je}")
-                return None
-            
-            async with self.session.post(
-                self.scrapingant_url,
-                json=scrapingant_params,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=60)
-            ) as response:
-                logger.info(f"ScrapingAnt response status: {response.status}")
-                
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"ScrapingAnt error: {error_text[:200]}")
-                    return None
-                    
-                response_data = await response.json()
-                
-                # Controleer of we een text of html response hebben
-                if "text" in response_data:
-                    logger.info("ScrapingAnt returned text content")
-                    return response_data["text"]
-                elif "html" in response_data:
-                    logger.info("ScrapingAnt returned HTML content")
-                    return response_data["html"]
-                else:
-                    logger.error("ScrapingAnt response doesn't contain text or HTML")
-                    logger.error(f"Response keys: {list(response_data.keys())}")
-                    return None
-        
-        except Exception as e:
-            logger.error(f"Error making ScrapingAnt request: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return None
-
-    async def get_calendar(self, days_ahead: int = 0, min_impact: str = "Low", currency: str = None) -> List[Dict[str, Any]]:
-        """
-        Fetch calendar events from TradingView
+    async def get_calendar(self, days_ahead: int = 0, min_impact: str = "Low", currency: str = None, all_currencies: bool = False) -> List[Dict[str, Any]]:
+        """Get economic calendar data
         
         Args:
-            days_ahead: Number of days to look ahead (0 = today only, 1 = today + tomorrow, etc.)
+            days_ahead: Number of days to look ahead
             min_impact: Minimum impact level to include (Low, Medium, High)
             currency: Optional currency to filter events by
+            all_currencies: If True, include all currencies
             
         Returns:
             List of calendar events
         """
+        logger.info(f"Getting calendar data (days_ahead={days_ahead}, min_impact={min_impact}, currency={currency})")
+        
         try:
-            logger.info(f"Getting calendar data (days_ahead={days_ahead}, min_impact={min_impact}, currency={currency})")
-            
-            # First check if the API is healthy
-            is_healthy = await self._check_api_health()
-            if not is_healthy:
-                logger.warning("API health check failed, using fallback data")
-                return self._generate_fallback_events(currency)
-            
             await self._ensure_session()
             
-            # Calculate date range - start from current time (not midnight)
-            # This is crucial for getting today's events that haven't happened yet
+            # Calculate date range
             current_time = datetime.now()
             
-            # For today's data, start from 8 hours ago to make sure we get all of today's events
-            # This ensures we don't miss events that happened earlier today
-            start_date = current_time - timedelta(hours=8)
-            end_date = current_time + timedelta(days=days_ahead)
+            # If days_ahead is 0, start from current time
+            # If days_ahead > 0, start from midnight of that day
+            if days_ahead == 0:
+                from_date = current_time
+            else:
+                # Start from midnight of the target day
+                from_date = datetime(
+                    current_time.year, current_time.month, current_time.day,
+                    0, 0, 0
+                ) + timedelta(days=days_ahead)
             
-            logger.info(f"Date range: {start_date.isoformat()} to {end_date.isoformat()}")
+            # End date is always the end of the selected day
+            to_date = datetime(
+                from_date.year, from_date.month, from_date.day,
+                23, 59, 59
+            ) + timedelta(days=0)
             
-            # Map major currencies to country codes for API request
-            currency_to_country = {
-                'USD': 'US',
-                'EUR': 'EU',
-                'GBP': 'GB',
-                'JPY': 'JP',
-                'CHF': 'CH',
-                'AUD': 'AU',
-                'NZD': 'NZ',
-                'CAD': 'CA'
-            }
+            # Log the date range for debugging
+            logger.info(f"Date range: {from_date} to {to_date}")
             
-            # Prepare request parameters
+            # Format dates for API
             params = {
-                'from': self._format_date(start_date),
-                'to': self._format_date(end_date),
-                'limit': 1000  # Increased limit to ensure we get all events
+                'from': self._format_date(from_date),
+                'to': self._format_date(to_date)
             }
-            
-            # Filter by specific currency if provided
-            if currency and currency in currency_to_country:
-                params['countries'] = currency_to_country[currency]
-                logger.info(f"Filtering by currency: {currency} (country code: {params['countries']})")
-            elif currency:
-                logger.warning(f"Currency {currency} not found in mapping, using all major currencies")
             
             # Add headers for better API compatibility
             headers = {
@@ -360,75 +228,82 @@ class TradingViewCalendarService:
                 "Accept": "application/json, text/plain, */*",
                 "Accept-Language": "en-US,en;q=0.9",
                 "Origin": "https://www.tradingview.com",
-                "Referer": "https://www.tradingview.com/economic-calendar/",
-                "Connection": "keep-alive",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache"
+                "Referer": "https://www.tradingview.com/economic-calendar/"
             }
             
-            # Determine whether to use ScrapingAnt or direct API access
-            if self.use_scrapingant and self.scrapingant_api_key:
-                logger.info("Using ScrapingAnt for calendar data")
-                try:
-                    # Use ScrapingAnt proxy for TradingView API
-                    response_text = await self._make_scrapingant_request(self.base_url, params)
+            # Make direct API call to TradingView
+            full_url = f"{self.base_url}"
+            logger.info(f"Making direct API request to: {full_url}")
+            
+            try:
+                async with self.session.get(full_url, params=params, headers=headers) as response:
+                    logger.info(f"API response status: {response.status}")
                     
-                    if not response_text:
-                        logger.error("Empty response from ScrapingAnt")
-                        return self._generate_fallback_events(currency)
+                    if response.status == 200:
+                        response_text = await response.text()
                         
-                    # Process response
-                    events = await self._process_response_text(response_text, min_impact, currency)
-                    
-                    # Update last successful call timestamp
-                    self.last_successful_call = datetime.now()
-                    
-                    return events
-                    
-                except Exception as e:
-                    logger.error(f"ScrapingAnt request failed: {str(e)}")
-                    return self._generate_fallback_events(currency)
+                        # Check if the response is valid JSON
+                        if response_text.strip().startswith('[') or response_text.strip().startswith('{'):
+                            logger.info("Successfully retrieved data from TradingView API")
+                            
+                            # Log a sample of the response for debugging
+                            logger.info(f"API Response Type: {type(response_text)}")
+                            try:
+                                data = json.loads(response_text)
+                                if isinstance(data, dict) and 'result' in data:
+                                    sample = data['result'][:2] if len(data['result']) > 2 else data['result']
+                                elif isinstance(data, list):
+                                    sample = data[:2] if len(data) > 2 else data
+                                else:
+                                    sample = str(data)[:200] + "..."
+                                logger.info(f"API Response Sample: {json.dumps(sample, default=str)}")
+                            except Exception as e:
+                                logger.error(f"Error parsing response sample: {str(e)}")
+                            
+                            self.last_successful_call = datetime.now()
+                            
+                            # Process the response
+                            events = await self._process_response_text(response_text, min_impact, currency)
+                            logger.info(f"Processed {len(events)} events from API response")
+                            
+                            # If no events were found, use fallback data
+                            if not events:
+                                logger.warning("No events found in API response, using fallback data")
+                                return self._generate_fallback_events(currency, all_currencies)
+                                
+                            return events
+                        else:
+                            logger.error("API returned 200 but not valid JSON")
+                            logger.error(f"First 200 chars of response: {response_text[:200]}")
+                    else:
+                        logger.error(f"API request failed with status {response.status}")
+            except Exception as e:
+                logger.error(f"Error making API call: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
             
-            # Direct API call if ScrapingAnt is not used
-            logger.info(f"Making direct API request to: {self.base_url}")
-            
-            # Use a longer timeout to prevent hanging
-            timeout = aiohttp.ClientTimeout(total=30)
-            
-            async with self.session.get(self.base_url, params=params, headers=headers, timeout=timeout) as response:
-                logger.info(f"Got response with status: {response.status}")
-                
-                if response.status != 200:
-                    logger.error(f"Error response from TradingView (status {response.status})")
-                    return self._generate_fallback_events(currency)
-                    
-                # Process response
-                response_text = await response.text()
-                
-                # Check if the API returns valid JSON response
-                if not response_text or not (response_text.strip().startswith('[') or response_text.strip().startswith('{')):
-                    logger.error("API returned invalid or empty response")
-                    return self._generate_fallback_events(currency)
-                
-                # Process response
-                events = await self._process_response_text(response_text, min_impact, currency)
-                
-                # Update last successful call timestamp
-                self.last_successful_call = datetime.now()
-                
-                return events
+            # If API call failed, use fallback data
+            logger.warning("API call failed, using fallback data")
+            return self._generate_fallback_events(currency, all_currencies)
                 
         except Exception as e:
-            logger.error(f"Error in get_calendar: {str(e)}")
+            logger.error(f"Error getting calendar data: {str(e)}")
             import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return self._generate_fallback_events(currency)
-        finally:
-            # Don't close the session here as it might be reused
-            pass
+            logger.error(traceback.format_exc())
+            
+            # Use fallback data
+            return self._generate_fallback_events(currency, all_currencies)
 
-    def _generate_fallback_events(self, currency=None) -> List[Dict]:
-        """Generate fallback economic events based on day of week"""
+    def _generate_fallback_events(self, currency=None, all_currencies: bool = False) -> List[Dict]:
+        """Generate fallback economic events based on day of week
+        
+        Args:
+            currency: Optional currency to filter events by
+            all_currencies: If True, include all currencies
+            
+        Returns:
+            List of fallback calendar events
+        """
         logger.info("Generating fallback economic events")
         events = []
         
@@ -451,8 +326,11 @@ class TradingViewCalendarService:
         # Find which currencies have events today
         active_currencies = weekday_events.get(weekday, ["USD"])
         
+        # If all_currencies is True, include all major currencies
+        if all_currencies:
+            active_currencies = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD"]
         # If currency is specified, only include that currency's events
-        if currency and currency not in active_currencies:
+        elif currency and currency not in active_currencies:
             # Add at least one event for the requested currency
             active_currencies = [currency]
         
@@ -495,15 +373,37 @@ class TradingViewCalendarService:
             ]
         }
         
+        # Generate date string for today
+        today_date_str = now.strftime("%Y-%m-%dT%H:%M:%S")
+        
         # Add events for active currencies
         for curr in active_currencies:
             if curr in currency_events:
                 for event_info in currency_events[curr]:
+                    # Create event time as datetime
+                    time_parts = event_info["time"].split(":")
+                    event_hour = int(time_parts[0])
+                    event_minute = int(time_parts[1])
+                    
+                    event_datetime = datetime(
+                        now.year, now.month, now.day, 
+                        event_hour, event_minute, 0
+                    )
+                    
+                    # Format as ISO string
+                    event_date_str = event_datetime.strftime("%Y-%m-%dT%H:%M:%S")
+                    
                     event = {
                         "country": curr,
                         "time": event_info["time"],
                         "event": event_info["event"],
-                        "impact": event_info["impact"]
+                        "impact": event_info["impact"],
+                        "previous": "1.2%",
+                        "forecast": "1.5%",
+                        "actual": None,
+                        "date": event_date_str,
+                        "datetime": event_datetime,
+                        "is_fallback": True  # Mark as fallback data
                     }
                     events.append(event)
         
@@ -520,8 +420,7 @@ class TradingViewCalendarService:
 
     # Voeg een nieuwe helper methode toe voor het verwerken van response tekst
     async def _process_response_text(self, response_text: str, min_impact: str = "Low", currency: str = None) -> List[Dict[str, Any]]:
-        """
-        Process the API response text and extract calendar events
+        """Process the API response text into a list of calendar events
         
         Args:
             response_text: The raw API response text
@@ -534,142 +433,163 @@ class TradingViewCalendarService:
         events = []
         
         try:
-            # Parse de JSON-respons
+            # Parse the JSON response
             data = json.loads(response_text)
             
-            # Debug logging to see the actual structure
-            logger.info(f"API Response Type: {type(data)}")
-            logger.info(f"API Response Keys: {data.keys() if isinstance(data, dict) else 'Not a dict'}")
-            logger.info(f"API Response Sample: {str(data)[:500]}...")
-            
-            # Check of de response de juiste structuur heeft - Updated for new API response format
+            # Check if the data is a list (direct events) or a dict with a result field
             if isinstance(data, dict) and 'result' in data:
-                # The TradingView API now returns a 'result' key containing the events
-                items = data.get('result', [])
-                logger.info(f"Found events in 'result' key: {len(items)} items")
-            elif isinstance(data, dict) and 'data' in data:
-                # Keep backward compatibility with old format
-                items = data.get('data', [])
-                logger.info(f"Found events in 'data' key: {len(items)} items")
+                logger.info("API response contains 'result' field")
+                items = data['result']
             elif isinstance(data, list):
-                # Direct list of events
+                logger.info("API response is a direct list of events")
                 items = data
-                logger.info(f"Found events in direct list: {len(items)} items")
             else:
-                logger.warning(f"Unexpected response format: {type(data)}")
-                # Try to extract data from the actual structure
+                logger.warning(f"Unexpected API response structure: {type(data)}")
                 if isinstance(data, dict):
-                    # Check for common keys that might contain events
-                    for potential_key in ['events', 'items', 'calendar', 'result']:
-                        if potential_key in data and isinstance(data[potential_key], list):
-                            items = data[potential_key]
-                            logger.info(f"Found events in key: {potential_key}")
-                            break
-                    else:
-                        # If no known keys, try the first list value we find
-                        for key, value in data.items():
-                            if isinstance(value, list) and value:
-                                items = value
-                                logger.info(f"Using list from key: {key}")
-                                break
-                        else:
-                            logger.error("Could not find any suitable list in response")
-                            return []
-                else:
-                    return []
-            
-            if not items:
-                logger.warning("No events found in the response")
+                    logger.warning(f"API response keys: {data.keys()}")
                 return []
             
-            logger.info(f"Found {len(items)} raw events in the response")
+            # Log the number of items and the structure of the first item
+            logger.info(f"Processing {len(items)} events from API")
+            if items and len(items) > 0:
+                logger.info(f"Event item structure: {items[0].keys()}")
             
-            # Map impact levels to numeric values for comparison
-            impact_levels = {
-                "Low": 1,
-                "Medium": 2,
-                "High": 3
-            }
-            min_impact_value = impact_levels.get(min_impact, 1)
-            
-            # Verwerk elk event
+            # Process each event
             for item in items:
+                # Skip non-dictionary items
+                if not isinstance(item, dict):
+                    logger.warning(f"Skipping non-dictionary item: {type(item)}")
+                    continue
+                
+                # Log the structure of each item for debugging (but limit to avoid excessive logging)
+                if len(events) < 3:
+                    logger.info(f"Event item structure: {item.keys()}")
+                
                 try:
-                    # Debug log the item structure
-                    logger.info(f"Event item structure: {item.keys() if isinstance(item, dict) else 'Not a dict'}")
+                    # Extract event details with fallbacks for missing fields
+                    event_date_str = item.get('date', '')
                     
-                    # Extract relevante informatie
-                    country_code = item.get('country')
-                    if not country_code:
+                    # Skip events without a date
+                    if not event_date_str:
+                        logger.warning("Skipping event with no date")
                         continue
                     
-                    # Controleer op valutafilter
-                    if currency and country_code != currency:
-                        continue
-                    
-                    # Extract tijd en datum
-                    event_time = item.get('date', '')
-                    if not event_time:
-                        continue
-                    
-                    # Extraheert de tijdinformatie
+                    # Parse the date string to a datetime object
                     try:
-                        event_datetime = datetime.fromisoformat(event_time.replace('Z', '+00:00'))
-                        event_time_str = event_datetime.strftime('%H:%M')
-                    except Exception as e:
-                        logger.warning(f"Failed to parse event time '{event_time}': {e}")
-                        event_time_str = "00:00"  # Standaard tijd als parsing faalt
-                    
-                    # Extraheert impact level
-                    impact = item.get('importance', 'Low')
-                    if isinstance(impact, int):
-                        # Convert numeric impact to string
-                        impact = {1: "Low", 2: "Medium", 3: "High"}.get(impact, "Low")
-                    
-                    # Filter op basis van impact
-                    impact_value = impact_levels.get(impact, 0)
-                    if impact_value < min_impact_value:
+                        # Handle different date formats
+                        if 'T' in event_date_str:
+                            # ISO format with T separator
+                            event_date = datetime.fromisoformat(event_date_str.replace('Z', '+00:00'))
+                        else:
+                            # Try simple date format
+                            event_date = datetime.strptime(event_date_str, '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        logger.warning(f"Could not parse date: {event_date_str}")
                         continue
                     
-                    # Extract event title - First try 'title' field, then fall back to 'indicator'
-                    event_title = 'Unknown Event'
-                    if 'title' in item and item['title']:
-                        event_title = item['title']
-                    elif 'indicator' in item and item['indicator']:
-                        event_title = item['indicator']
+                    # Format the time for display
+                    event_time = event_date.strftime('%H:%M')
                     
-                    # Create event object
+                    # Get the country/currency with fallbacks
+                    event_country = item.get('country', '')
+                    
+                    # Skip events for other currencies if a specific currency is requested
+                    if currency and event_country != currency:
+                        continue
+                    
+                    # Get the title/event name with fallbacks
+                    event_title = item.get('title', '')
+                    if not event_title and 'indicator' in item:
+                        event_title = item.get('indicator', '')
+                    
+                    # Determine impact level with robust handling
+                    impact = "Low"
+                    if 'importance' in item:
+                        importance = item.get('importance', 0)
+                        if isinstance(importance, (int, float)):
+                            if importance >= 3:
+                                impact = "High"
+                            elif importance >= 2:
+                                impact = "Medium"
+                            else:
+                                impact = "Low"
+                        elif isinstance(importance, str):
+                            # If importance is already a string, use it directly if valid
+                            if importance in ["High", "Medium", "Low"]:
+                                impact = importance
+                    
+                    # Skip events with impact lower than min_impact
+                    if min_impact == "High" and impact != "High":
+                        continue
+                    elif min_impact == "Medium" and impact == "Low":
+                        continue
+                    
+                    # Get forecast and previous values with consistent formatting
+                    forecast = item.get('forecast', '')
+                    if not forecast and 'forecastRaw' in item:
+                        forecast_raw = item.get('forecastRaw', '')
+                        if forecast_raw not in (None, ''):
+                            forecast = str(forecast_raw)
+                    
+                    previous = item.get('previous', '')
+                    if not previous and 'previousRaw' in item:
+                        previous_raw = item.get('previousRaw', '')
+                        if previous_raw not in (None, ''):
+                            previous = str(previous_raw)
+                    
+                    actual = item.get('actual', '')
+                    if not actual and 'actualRaw' in item:
+                        actual_raw = item.get('actualRaw', '')
+                        if actual_raw not in (None, ''):
+                            actual = str(actual_raw)
+                    
+                    # Create the event object with consistent keys
                     event = {
-                        "country": country_code,
-                        "time": event_time_str,
-                        "event": event_title,
-                        "impact": impact,
-                        "forecast": item.get('forecast', ''),
-                        "previous": item.get('previous', ''),
-                        "actual": item.get('actual', '')
+                        'time': event_time,
+                        'country': event_country,
+                        'event': event_title,
+                        'impact': impact,
+                        'forecast': forecast,
+                        'previous': previous,
+                        'actual': actual,
+                        'datetime': event_date,  # Keep the full datetime for sorting
+                        'date': event_date_str,  # Keep the original date string
                     }
                     
-                    # Voeg event toe aan de lijst
-                    events.append(event)
+                    # Add any additional fields that might be useful
+                    if 'currency' in item:
+                        event['currency'] = item.get('currency', '')
                     
+                    if 'unit' in item:
+                        event['unit'] = item.get('unit', '')
+                    
+                    if 'ticker' in item:
+                        event['ticker'] = item.get('ticker', '')
+                    
+                    events.append(event)
+                
                 except Exception as e:
-                    logger.warning(f"Error processing event: {e}")
+                    logger.error(f"Error processing event: {str(e)}")
+                    import traceback
+                    logger.error(traceback.format_exc())
                     continue
             
-            # Sorteer events op tijd
-            events.sort(key=lambda x: x["time"])
+            # Sort events by datetime
+            events.sort(key=lambda x: x['datetime'])
             
+            # Log the number of events after processing
             logger.info(f"Processed {len(events)} events after filtering")
+            
             return events
             
         except json.JSONDecodeError:
-            logger.error("Failed to parse response as JSON")
-            logger.debug(f"Invalid JSON response: {response_text[:200]}...")
+            logger.error("Failed to parse API response as JSON")
+            logger.error(f"Response preview: {response_text[:200]}...")
             return []
         except Exception as e:
-            logger.error(f"Error in processing response text: {e}")
+            logger.error(f"Error processing API response: {str(e)}")
             import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(traceback.format_exc())
             return []
 
     async def debug_api_connection(self):
@@ -682,8 +602,8 @@ class TradingViewCalendarService:
             "sample_events": [],
             "last_successful_call": None,
             "test_time": datetime.now().isoformat(),
-            "scrapingant_enabled": self.use_scrapingant,
-            "scrapingant_api_key_set": bool(self.scrapingant_api_key)
+            "scrapingant_enabled": False,
+            "scrapingant_api_key_set": False
         }
         
         try:
@@ -691,11 +611,6 @@ class TradingViewCalendarService:
             logger.info("Environment variables:")
             logger.info(f"- USE_SCRAPINGANT: {os.environ.get('USE_SCRAPINGANT', 'not set')}")
             logger.info(f"- USE_CALENDAR_FALLBACK: {os.environ.get('USE_CALENDAR_FALLBACK', 'not set')}")
-            if self.scrapingant_api_key:
-                masked_key = f"{self.scrapingant_api_key[:5]}...{self.scrapingant_api_key[-3:]}" if len(self.scrapingant_api_key) > 8 else "[masked]"
-                logger.info(f"- SCRAPINGANT_API_KEY: {masked_key}")
-            else:
-                logger.info("- SCRAPINGANT_API_KEY: not set")
             
             # Check API health
             await self._ensure_session()
@@ -715,33 +630,7 @@ class TradingViewCalendarService:
                 debug_info["last_successful_call"] = self.last_successful_call.isoformat() if self.last_successful_call else None
             else:
                 # Als API health check mislukt, probeer alsnog ScrapingAnt als fallback
-                if self.use_scrapingant and self.scrapingant_api_key:
-                    logger.info("API health check failed, trying ScrapingAnt directly")
-                    
-                    try:
-                        # Voer direct een ScrapingAnt request uit
-                        start_date = datetime.now()
-                        end_date = start_date + timedelta(days=1)
-                        
-                        params = {
-                            'from': self._format_date(start_date),
-                            'to': self._format_date(end_date),
-                            'countries': 'US,EU,GB,JP,CH,AU,NZ,CA',
-                            'limit': 10  # Beperkt aantal voor debug
-                        }
-                        
-                        response_text = await self._make_scrapingant_request(self.base_url, params)
-                        if response_text:
-                            debug_info["scrapingant_response"] = response_text[:200] + "..."  # Eerste 200 tekens
-                            
-                            # Verwerk de respons als die er goed uitziet
-                            if response_text.strip().startswith('[') or response_text.strip().startswith('{'):
-                                events = await self._process_response_text(response_text, "Low", None)
-                                debug_info["scrapingant_events_retrieved"] = len(events)
-                                debug_info["scrapingant_sample_events"] = events[:3] if events else []
-                    except Exception as e:
-                        logger.error(f"Error during ScrapingAnt debug request: {str(e)}")
-                        debug_info["scrapingant_error"] = str(e)
+                logger.info("API health check failed, using fallback data")
             
             logger.info(f"API debug completed: health={debug_info['api_health']}, events={debug_info.get('events_retrieved', 0)}")
             return debug_info
@@ -757,16 +646,15 @@ class TradingViewCalendarService:
             await self._close_session()
 
     async def get_economic_calendar(self, currencies: List[str] = None, days_ahead: int = 0, min_impact: str = "Low") -> str:
-        """
-        Fetch and format economic calendar events for multiple currencies
+        """Get economic calendar formatted for Telegram
         
         Args:
-            currencies: List of currency codes to filter events by (e.g. ["EUR", "USD"])
-            days_ahead: Number of days to look ahead
-            min_impact: Minimum impact level to include (Low, Medium, High)
+            currencies: List of currencies to filter events by
+            days_ahead: Number of days to look ahead (0=today, 1=tomorrow, etc.)
+            min_impact: Minimum impact level to include ("Low", "Medium", "High")
             
         Returns:
-            Formatted HTML string with calendar data
+            Formatted calendar string for Telegram
         """
         try:
             logger.info(f"Getting economic calendar for currencies: {currencies}, days_ahead: {days_ahead}")
@@ -799,7 +687,7 @@ class TradingViewCalendarService:
             logger.exception(e)
             
             # Return a minimal calendar with error message
-            return "<b>📅 Economic Calendar</b>\n\nSorry, there was an error retrieving the economic calendar data."
+            return "<b>📅 Economic Calendar</b>\n\nSorry, there was an error retrieving the economic calendar data. Please try again later."
 
     async def format_calendar_chronologically(self, events: List[Dict], today_formatted: str = None, group_by_currency: bool = False) -> str:
         """
@@ -855,26 +743,53 @@ async def format_calendar_for_telegram(events: List[Dict]) -> str:
     logger.info(f"Formatting {len(events)} events for Telegram")
     event_counts = {"total": len(events), "valid": 0, "missing_fields": 0, "highlighted": 0}
     
-    # Log all events to help diagnose issues
-    logger.info(f"Events to format: {json.dumps(events[:5], indent=2)}")
+    # Log sample events to help diagnose issues
+    try:
+        sample_events = events[:2]
+        logger.info(f"Sample events to format: {json.dumps(sample_events, indent=2, default=str)}")
+    except Exception as e:
+        logger.error(f"Error logging sample events: {str(e)}")
     
     # Sort events by time if not already sorted
     try:
-        # Verbeterde sortering met datetime objecten
+        # Improved sorting with datetime objects
         def parse_time_for_sorting(event):
-            time_str = event.get("time", "00:00")
+            # Try to get time from different possible fields
+            time_str = event.get("time", "")
+            
+            # If no time field, try to extract from datetime or date field
+            if not time_str and "datetime" in event:
+                try:
+                    if isinstance(event["datetime"], datetime):
+                        return event["datetime"].hour * 60 + event["datetime"].minute
+                    return 0
+                except:
+                    pass
+            
+            # If no datetime field, try to extract from date field
+            if not time_str and "date" in event:
+                try:
+                    date_str = event["date"]
+                    if 'T' in date_str:
+                        # ISO format with T separator
+                        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        return dt.hour * 60 + dt.minute
+                except:
+                    pass
+            
+            # Parse time string if available
             try:
-                if ":" in time_str:
+                if time_str and ":" in time_str:
                     hours, minutes = time_str.split(":")
                     # Strip any AM/PM/timezone indicators
                     hours = hours.strip()
                     if " " in minutes:
                         minutes = minutes.split(" ")[0]
                     return int(hours) * 60 + int(minutes)
-                return 0
             except Exception as e:
                 logger.error(f"Error parsing time for sorting: {str(e)} for time: {time_str}")
-                return 0
+            
+            return 0
         
         sorted_events = sorted(events, key=parse_time_for_sorting)
         logger.info(f"Sorted {len(sorted_events)} events by time")
@@ -889,57 +804,93 @@ async def format_calendar_for_telegram(events: List[Dict]) -> str:
     # Add impact legend
     message += "<b>Impact:</b> 🔴 High   🟠 Medium   🟢 Low\n\n"
     
-    # Group events by country for better readability
+    # Group events by country for better organization
     events_by_country = {}
+    
     for event in sorted_events:
-        country = event.get("country", "")
+        # Get country code, with fallbacks
+        country = event.get('country', '')
+        if not country and 'currency' in event:
+            country = event.get('currency', '')
+        
+        if not country:
+            country = 'Unknown'
+            
         if country not in events_by_country:
             events_by_country[country] = []
+            
         events_by_country[country].append(event)
     
-    # Display events grouped by country
-    for country, country_events in events_by_country.items():
+    # Process each country group
+    for country, country_events in sorted(events_by_country.items()):
         # Add country header
-        message += f" {country}\n"
+        message += f"<b>{country}</b>\n"
         
-        # Add events for this country
+        # Process events for this country
         for i, event in enumerate(country_events):
             try:
-                time = event.get("time", "")
-                title = event.get("event", "")
-                impact = event.get("impact", "Low")
+                # Extract event details with robust fallbacks
+                
+                # Get time with fallbacks
+                event_time = event.get('time', '')
+                if not event_time and 'datetime' in event and isinstance(event['datetime'], datetime):
+                    event_time = event['datetime'].strftime('%H:%M')
+                if not event_time and 'date' in event:
+                    try:
+                        date_str = event['date']
+                        if 'T' in date_str:
+                            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                            event_time = dt.strftime('%H:%M')
+                    except:
+                        pass
+                if not event_time:
+                    event_time = 'TBA'
+                
+                # Get event title with fallbacks
+                event_title = event.get('event', '')
+                if not event_title:
+                    event_title = event.get('title', '')
+                if not event_title and 'indicator' in event:
+                    event_title = event.get('indicator', '')
+                if not event_title:
+                    event_title = 'Unnamed Event'
+                
+                # Get impact with fallbacks
+                impact = event.get('impact', 'Low')
                 impact_emoji = impact_emoji_map.get(impact, "🟢")
                 
-                # Check if this event is highlighted (specific to the requested currency)
-                is_highlighted = event.get("highlighted", False)
-                if is_highlighted:
-                    event_counts["highlighted"] += 1
+                # Format event line
+                event_line = f"{event_time} - {impact_emoji} {event_title}"
                 
-                # Log each event being processed for debugging
-                if i < 5:
-                    logger.debug(f"Processing event {i+1} for {country}: {json.dumps(event)}")
-                
-                # Controleer of alle benodigde velden aanwezig zijn
-                if not time or not title:
-                    missing = []
-                    if not time: missing.append("time") 
-                    if not title: missing.append("event")
-                    
-                    logger.warning(f"Event {i+1} missing fields: {', '.join(missing)}: {json.dumps(event)}")
-                    event_counts["missing_fields"] += 1
-                    continue
-                
-                # Format the line with enhanced visibility
-                event_line = f"{time} - {impact_emoji} {title}"
-                
-                # Add previous/forecast/actual values if available
+                # Add values if available
                 values = []
-                if "previous" in event and event["previous"] is not None:
-                    values.append(f"{event['previous']}")
-                if "forecast" in event and event["forecast"] is not None:
-                    values.append(f"Fcst: {event['forecast']}")
-                if "actual" in event and event["actual"] is not None:
-                    values.append(f"Act: {event['actual']}")
+                
+                # Handle previous, forecast and actual values with robust checks
+                previous = None
+                if "previous" in event and event["previous"] not in (None, ''):
+                    previous = event["previous"]
+                elif "previousRaw" in event and event["previousRaw"] not in (None, ''):
+                    previous = event["previousRaw"]
+                
+                forecast = None
+                if "forecast" in event and event["forecast"] not in (None, ''):
+                    forecast = event["forecast"]
+                elif "forecastRaw" in event and event["forecastRaw"] not in (None, ''):
+                    forecast = event["forecastRaw"]
+                
+                actual = None
+                if "actual" in event and event["actual"] not in (None, ''):
+                    actual = event["actual"]
+                elif "actualRaw" in event and event["actualRaw"] not in (None, ''):
+                    actual = event["actualRaw"]
+                
+                # Add values to the event line
+                if previous is not None:
+                    values.append(f"Prev: {previous}")
+                if forecast is not None:
+                    values.append(f"Fcst: {forecast}")
+                if actual is not None:
+                    values.append(f"Act: {actual}")
                     
                 if values:
                     event_line += f" ({', '.join(values)})"
@@ -949,8 +900,15 @@ async def format_calendar_for_telegram(events: List[Dict]) -> str:
                 
             except Exception as e:
                 logger.error(f"Error formatting event {i+1}: {str(e)}")
-                logger.error(f"Problematic event: {json.dumps(event)}")
+                try:
+                    logger.error(f"Problematic event: {json.dumps(event, default=str)}")
+                except:
+                    logger.error("Could not log problematic event - serialization error")
+                event_counts["missing_fields"] += 1
                 continue
+        
+        # Add spacing between countries
+        message += "\n"
     
     if event_counts["valid"] == 0:
         logger.warning("No valid events to display in calendar")

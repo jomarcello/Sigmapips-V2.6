@@ -48,71 +48,34 @@ os.environ["BROWSERBASE_API_KEY"] = ""
 os.environ["BROWSERBASE_PROJECT_ID"] = ""
 logger.info("✅ BrowserBase services disabled")
 
-# Built-in fallback EconomicCalendarService in case the real one doesn't work
-class InternalFallbackCalendarService:
-    """Internal fallback implementation of EconomicCalendarService"""
-    def __init__(self, *args, **kwargs):
-        self.logger = logging.getLogger(__name__)
-        self.logger.warning("Internal fallback EconomicCalendarService is being used!")
+# Import the EconomicCalendarService class
+try:
+    from trading_bot.services.calendar_service.calendar import EconomicCalendarService
+    logger.info("Successfully imported EconomicCalendarService")
+except ImportError as e:
+    logger.error(f"Failed to import EconomicCalendarService: {str(e)}")
+    logger.error(traceback.format_exc())
+    # Define a placeholder class if import fails
+    class EconomicCalendarService:
+        def __init__(self):
+            self.logger = logging.getLogger(__name__)
+            self.logger.error("Using placeholder EconomicCalendarService (import failed)")
         
-    async def get_calendar(self, days_ahead: int = 0, min_impact: str = "Low", currency: str = None) -> List[Dict]:
-        """Return empty calendar data"""
-        self.logger.info(f"Internal fallback get_calendar called")
-        return []
-    
-    async def get_economic_calendar(self, currencies: List[str] = None, days_ahead: int = 0, min_impact: str = "Low") -> str:
-        """Return empty economic calendar message"""
-        return "<b>📅 Economic Calendar</b>\n\nNo economic events available (using internal fallback)."
+        async def get_calendar(self, *args, **kwargs):
+            self.logger.error("Placeholder get_calendar called")
+            return []
         
-    async def get_events_for_instrument(self, instrument: str, *args, **kwargs) -> Dict[str, Any]:
-        """Return empty events for an instrument"""
-        return {
-            "events": [], 
-            "explanation": f"No calendar events available (using internal fallback)"
-        }
-        
-    async def get_instrument_calendar(self, instrument: str, *args, **kwargs) -> str:
-        """Return empty calendar for an instrument"""
-        return "<b>📅 Economic Calendar</b>\n\nNo calendar events available (using internal fallback)."
+        async def get_economic_calendar(self, *args, **kwargs):
+            self.logger.error("Placeholder get_economic_calendar called")
+            return "Economic calendar service is not available."
 
-# Log clearly whether we're using fallback or not
-USE_FALLBACK = os.environ.get("USE_CALENDAR_FALLBACK", "").lower() in ("true", "1", "yes")
-if USE_FALLBACK:
-    logger.info("⚠️ Calendar fallback mode is enabled, using fallback implementation")
-    # Use internal fallback
-    EconomicCalendarService = InternalFallbackCalendarService
-    logger.info("Successfully initialized internal fallback EconomicCalendarService")
-else:
-    # Try the full implementation first
-    logger.info("✅ Calendar fallback mode is disabled, will use real implementation")
-    
-    try:
-        logger.info("Attempting to import EconomicCalendarService from calendar.py...")
-        from trading_bot.services.calendar_service.calendar import EconomicCalendarService
-        logger.info("Successfully imported EconomicCalendarService from calendar.py")
-        
-        # Test importing TradingView calendar
-        try:
-            from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
-            logger.info("Successfully imported TradingViewCalendarService")
-            logger.info("Using direct TradingView API for calendar data")
-            
-        except Exception as e:
-            logger.warning(f"TradingViewCalendarService import failed: {e}")
-            logger.debug(traceback.format_exc())
-            logger.warning("TradingView calendar service could not be imported")
-
-    except Exception as e:
-        # If the import fails, use our internal fallback implementation
-        logger.error(f"Could not import EconomicCalendarService from calendar.py: {str(e)}")
-        logger.debug(traceback.format_exc())
-        logger.warning("Using internal fallback implementation")
-        
-        # Use internal fallback
-        EconomicCalendarService = InternalFallbackCalendarService
-        
-        # Log that we're using the fallback
-        logger.info("Successfully initialized internal fallback EconomicCalendarService")
+# Define impact emoji mapping for use in formatting functions
+IMPACT_EMOJI = {
+    "High": "🔴",
+    "Medium": "🟠",
+    "Medium-Low": "🟡",
+    "Low": "🟢"
+}
 
 # Export TradingView debug function if available
 try:
@@ -134,7 +97,8 @@ try:
         logger.info(f"Retrieved {len(events)} total events")
         return events
 
-    __all__ = ['EconomicCalendarService', 'debug_tradingview_api', 'get_all_calendar_events']
-except Exception:
+    __all__ = ['EconomicCalendarService', 'debug_tradingview_api', 'get_all_calendar_events', 'IMPACT_EMOJI']
+except Exception as e:
     # If the import fails, only export the EconomicCalendarService
-    __all__ = ['EconomicCalendarService']
+    logger.error(f"Failed to import TradingViewCalendarService: {str(e)}")
+    __all__ = ['EconomicCalendarService', 'IMPACT_EMOJI']
