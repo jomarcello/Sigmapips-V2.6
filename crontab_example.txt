@@ -1,0 +1,15 @@
+# Example crontab configuration for economic calendar
+# Edit with: crontab -e
+
+# Environment variables
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+
+# Send today's calendar at 8:00 AM every day
+0 8 * * * cd /path/to/script && ./send_calendar_to_telegram.sh
+
+# Send tomorrow's calendar at 8:00 PM every day
+0 20 * * * cd /path/to/script && ./send_calendar_to_telegram.sh --days=1
+
+# Send next week's calendar every Sunday at 7:00 PM
+0 19 * * 0 cd /path/to/script && ./send_calendar_to_telegram.sh --days=1 && ./send_calendar_to_telegram.sh --days=2 && ./send_calendar_to_telegram.sh --days=3 && ./send_calendar_to_telegram.sh --days=4 && ./send_calendar_to_telegram.sh --days=5 
