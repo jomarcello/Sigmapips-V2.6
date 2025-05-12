@@ -260,6 +260,9 @@ class EconomicCalendarService:
             date_header = f"*{date}* {'(Today)' if is_today else ''}"
             calendar_text += f"📆 {date_header}\n"
             
+            # Add impact legend
+            calendar_text += "Impact: 🔴 High   🟠 Medium   🟢 Low\n\n"
+            
             # Sort events by time
             date_events.sort(key=lambda e: e.get("time", "00:00"))
             
@@ -267,6 +270,7 @@ class EconomicCalendarService:
             for event in date_events:
                 time = event.get("time", "")
                 currency = event.get("currency", "")
+                country = event.get("country", "")
                 impact = event.get("impact", "Low")
                 title = event.get("title", "")
                 forecast = event.get("forecast", "")
@@ -276,13 +280,20 @@ class EconomicCalendarService:
                 impact_emoji = IMPACT_EMOJI.get(impact, "⚪")
                 
                 # Format the event
-                event_text = f"{time} {currency} {impact_emoji} {title}"
-                if forecast:
+                event_text = f"{time} - {impact_emoji} "
+                
+                # Add country/flag if available
+                if country:
+                    event_text += f"{country} "
+                
+                # Add title and details
+                event_text += f"{title}"
+                if forecast and forecast != "N/A":
                     event_text += f" (Forecast: {forecast})"
-                if previous:
+                if previous and previous != "N/A":
                     event_text += f" (Previous: {previous})"
                 
-                calendar_text += f"• {event_text}\n"
+                calendar_text += f"{event_text}\n"
             
             # Add separator between dates
             calendar_text += "\n"
