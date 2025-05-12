@@ -30,6 +30,10 @@ def kill_all_bot_processes():
     """Kill all python processes that might be running the bot"""
     print_header("Killing all bot processes")
     
+    # Get our own PID to avoid killing this script
+    our_pid = os.getpid()
+    logger.info(f"Our PID: {our_pid} (will not be killed)")
+    
     try:
         # Find all Python processes
         cmd = "ps aux | grep python | grep -v grep"
@@ -43,16 +47,19 @@ def kill_all_bot_processes():
         bot_processes = []
         for line in result.stdout.splitlines():
             if (
-                "bot.py" in line or 
+                ("bot.py" in line or 
                 "main.py" in line or 
                 "trading_bot" in line or 
                 "start_bot" in line or
-                "telegram" in line
-            ) and "grep" not in line:
+                "telegram" in line) and 
+                "grep" not in line
+            ):
                 parts = line.split()
                 if len(parts) > 1:
-                    pid = parts[1]
-                    bot_processes.append(pid)
+                    pid = int(parts[1])
+                    # Don't kill ourselves
+                    if pid != our_pid and not str(line).endswith(f"start_with_cleanup.py --script={bot_script}"):
+                        bot_processes.append(pid)
         
         # Kill each process
         if bot_processes:
@@ -60,13 +67,13 @@ def kill_all_bot_processes():
             for pid in bot_processes:
                 try:
                     logger.info(f"Killing process {pid}")
-                    os.kill(int(pid), signal.SIGTERM)
+                    os.kill(pid, signal.SIGTERM)
                     time.sleep(0.5)  # Give it time to terminate
                 except Exception as e:
                     logger.error(f"Error killing process {pid}: {str(e)}")
                     try:
                         # Try harder
-                        os.kill(int(pid), signal.SIGKILL)
+                        os.kill(pid, signal.SIGKILL)
                     except:
                         pass
             
@@ -77,7 +84,7 @@ def kill_all_bot_processes():
             remaining = []
             for line in check_result.stdout.splitlines():
                 for pid in bot_processes:
-                    if pid in line:
+                    if str(pid) in line:
                         remaining.append(pid)
             
             if remaining:
@@ -85,8 +92,9 @@ def kill_all_bot_processes():
                 # Force kill them
                 for pid in remaining:
                     try:
-                        os.kill(int(pid), signal.SIGKILL)
-                        logger.info(f"Force killed process {pid}")
+                        if pid != our_pid:  # Double-check not to kill ourselves
+                            os.kill(pid, signal.SIGKILL)
+                            logger.info(f"Force killed process {pid}")
                     except:
                         pass
             else:
@@ -311,6 +319,7 @@ def main():
     args = parser.parse_args()
     
     # Find bot script
+    global bot_script  # Make it accessible in kill_all_bot_processes
     bot_script = args.script if args.script else find_bot_script()
     
     if not bot_script:
