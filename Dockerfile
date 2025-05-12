@@ -39,11 +39,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip and install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers
-RUN playwright install chromium
+# Install Playwright browsers with error handling
+RUN playwright install chromium || echo "Playwright browser installation failed, will attempt to continue"
 
 # Copy application code (excluding .env in production)
 COPY . .
@@ -58,8 +59,8 @@ ENV TZ=Europe/Amsterdam
 # ENV TAVILY_API_KEY=""
 
 # Setup initial configuration
-RUN chmod +x ./docker_setup.sh
-RUN ./docker_setup.sh
+RUN chmod +x ./docker_setup.sh || echo "docker_setup.sh not found or not executable, skipping"
+RUN if [ -f "./docker_setup.sh" ]; then ./docker_setup.sh; else echo "Skipping docker_setup.sh"; fi
 
 # Expose port for FastAPI
 EXPOSE 8000

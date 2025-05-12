@@ -1,27 +1,33 @@
 #!/bin/bash
-# Docker setup script voor SigmaPips Trading Bot
+# Docker setup script for SigmaPips Trading Bot
 
-# Log bericht voor debugging
+# Log message for debugging
 echo "Starting Docker setup for SigmaPips Trading Bot..."
 
-# Installeer benodigde systeem packages 
-echo "Installing system packages..."
-apt-get update && apt-get install -y \
-    python3-pip \
-    python3-dev \
-    build-essential \
-    libssl-dev \
-    libffi-dev \
-    libpq-dev
+# We don't need to install system packages or dependencies again
+# as they are already installed in the Dockerfile
 
-# Installeer alle dependencies 
-echo "Installing Python dependencies from requirements.txt..."
-pip install -r requirements.txt
+# Create necessary directories if they don't exist
+echo "Creating necessary directories..."
+mkdir -p data/cache
+mkdir -p logs
+mkdir -p tmp
 
-# Installeer Playwright voor Python
-echo "Installing Playwright for Python..."
-pip install playwright
-playwright install chromium
+# Set proper permissions
+echo "Setting permissions..."
+chmod -R 755 data
+chmod -R 755 logs
+chmod -R 755 tmp
 
-echo "Docker setup completed."
-echo "You can now start the application." 
+# Create empty __init__.py files if they don't exist
+# This ensures Python can import from these directories
+echo "Setting up Python package structure..."
+touch trading_bot/__init__.py
+touch trading_bot/services/__init__.py
+
+# Create log files if they don't exist
+echo "Creating log files..."
+touch logs/app.log
+touch logs/error.log
+
+echo "Docker setup completed successfully." 

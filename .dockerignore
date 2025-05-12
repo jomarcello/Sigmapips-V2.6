@@ -1,0 +1,98 @@
+# Git
+.git
+.gitignore
+.github
+
+# Environment variables
+.env
+.env.*
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+venv*/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs and databases
+*.log
+*.sqlite3
+*.sqlite
+logs/
+!logs/.gitkeep
+
+# Cache
+.cache/
+data/cache/
+!data/cache/.gitkeep
+
+# System
+.DS_Store
+Thumbs.db
+.directory
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Documentation
+docs/
+README*.md
+!README.md
+CHANGELOG.md
+LICENSE
+
+# Docker
+Dockerfile.*
+docker-compose*.yml
+!docker-compose.yml
+
+# Large files and directories
+*.csv
+*.json
+*.pkl
+*.model
+*.bin
+models/
+!models/.gitkeep
+screenshots/
+!screenshots/.gitkeep
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+.temp/
+!tmp/.gitkeep 
