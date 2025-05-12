@@ -12,64 +12,48 @@ from typing import Dict, List, Any, Optional
 logger = logging.getLogger(__name__)
 logger.info("Initializing calendar service module...")
 
-# Configureer een extra handlertje voor kalender gerelateerde logs
+# Configure an additional handler for calendar-related logs
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
 
-# Detecteer of we in Railway draaien
+# Detect if we're running in Railway
 RUNNING_IN_RAILWAY = os.environ.get("RAILWAY_ENVIRONMENT") is not None
 HOSTNAME = socket.gethostname()
 
 logger.info(f"Running on host: {HOSTNAME}")
 logger.info(f"Running in Railway: {RUNNING_IN_RAILWAY}")
 
-# BELANGRIJK: Force instellingen voor TradingView calendar
-# Expliciet investing.com uitschakelen (investing is verwijderd)
+# IMPORTANT: Force settings for TradingView calendar
+# Explicitly disable investing.com (investing has been removed)
 os.environ["USE_INVESTING_CALENDAR"] = "false"
-logger.info("⚠️ Investing.com calendar is verwijderd en niet meer beschikbaar")
-print("⚠️ Investing.com calendar is verwijderd en niet meer beschikbaar")
+logger.info("⚠️ Investing.com calendar is no longer available")
 
-# Calendar fallback uitschakelen - we willen echte data
-os.environ["USE_CALENDAR_FALLBACK"] = "false"
-logger.info("⚠️ Forcing USE_CALENDAR_FALLBACK=false to use real data")
-print("⚠️ Forcing USE_CALENDAR_FALLBACK=false to use real data")
+# Calendar fallback only enabled if explicitly requested
+use_fallback = os.environ.get("CALENDAR_FALLBACK", "").lower() in ("true", "1", "yes")
+os.environ["USE_CALENDAR_FALLBACK"] = "true" if use_fallback else "false"
+logger.info(f"Calendar fallback mode is {'enabled' if use_fallback else 'disabled'}")
 
-# ScrapingAnt uitschakelen en OpenAI o4-mini inschakelen
+# Disable all alternative services
 os.environ["USE_SCRAPINGANT"] = "false"
-os.environ["USE_OPENAI_O4MINI"] = "true"
-logger.info("⚠️ Disabling ScrapingAnt and enabling OpenAI o4-mini for economic calendar data")
-print("⚠️ Disabling ScrapingAnt and enabling OpenAI o4-mini for economic calendar data")
+os.environ["USE_OPENAI_O4MINI"] = "false"
+logger.info("✅ Using only direct TradingView API (no ScrapingAnt or OpenAI)")
 
 # Force the use of TradingView calendar service
 os.environ["USE_TRADINGVIEW_CALENDAR"] = "true"
-logger.info("⚠️ Forcing USE_TRADINGVIEW_CALENDAR=true to use TradingView economic calendar")
-print("⚠️ Forcing USE_TRADINGVIEW_CALENDAR=true to use TradingView economic calendar")
+logger.info("✅ Using TradingView economic calendar")
 
 # Disable BrowserBase services
 os.environ["BROWSERBASE_API_KEY"] = ""
 os.environ["BROWSERBASE_PROJECT_ID"] = ""
-logger.info("⚠️ Disabling BrowserBase services to ensure TradingView is used")
-print("⚠️ Disabling BrowserBase services to ensure TradingView is used")
+logger.info("✅ BrowserBase services disabled")
 
-# Controleer of OpenAI API key is ingesteld
-if os.environ.get("OPENAI_API_KEY") is None:
-    logger.warning("⚠️ OPENAI_API_KEY is not set, some features may not work correctly")
-    print("⚠️ OPENAI_API_KEY is not set, some features may not work correctly")
-else:
-    logger.info("✅ OPENAI_API_KEY is set and will be used for o4-mini integration")
-    print("✅ OPENAI_API_KEY is set and will be used for o4-mini integration")
-
-# Check of er iets expliciets in de omgeving is ingesteld voor fallback
-USE_FALLBACK = False  # We willen de echte implementatie gebruiken, niet de fallback
-
-# Ingebouwde fallback EconomicCalendarService voor het geval de echte niet werkt
+# Built-in fallback EconomicCalendarService in case the real one doesn't work
 class InternalFallbackCalendarService:
-    """Interne fallback implementatie van EconomicCalendarService"""
+    """Internal fallback implementation of EconomicCalendarService"""
     def __init__(self, *args, **kwargs):
         self.logger = logging.getLogger(__name__)
         self.logger.warning("Internal fallback EconomicCalendarService is being used!")
-        print("⚠️ INTERNAL FALLBACK CALENDAR SERVICE IS ACTIVE ⚠️")
         
     async def get_calendar(self, days_ahead: int = 0, min_impact: str = "Low", currency: str = None) -> List[Dict]:
         """Return empty calendar data"""
@@ -91,58 +75,46 @@ class InternalFallbackCalendarService:
         """Return empty calendar for an instrument"""
         return "<b>📅 Economic Calendar</b>\n\nNo calendar events available (using internal fallback)."
 
-# Log duidelijk naar de console of we fallback gebruiken of niet
+# Log clearly whether we're using fallback or not
+USE_FALLBACK = os.environ.get("USE_CALENDAR_FALLBACK", "").lower() in ("true", "1", "yes")
 if USE_FALLBACK:
-    logger.info("⚠️ USE_CALENDAR_FALLBACK is set to True, using fallback implementation")
-    print("⚠️ Calendar fallback mode is ENABLED via environment variable")
-    print(f"⚠️ Check environment value: '{os.environ.get('USE_CALENDAR_FALLBACK', '')}'")
-    # Gebruik interne fallback
+    logger.info("⚠️ Calendar fallback mode is enabled, using fallback implementation")
+    # Use internal fallback
     EconomicCalendarService = InternalFallbackCalendarService
     logger.info("Successfully initialized internal fallback EconomicCalendarService")
 else:
-    # Probeer eerst de volledige implementatie
-    logger.info("✅ USE_CALENDAR_FALLBACK is set to False, will use real implementation")
-    print("✅ Calendar fallback mode is DISABLED")
-    print(f"✅ Environment value: '{os.environ.get('USE_CALENDAR_FALLBACK', '')}'")
+    # Try the full implementation first
+    logger.info("✅ Calendar fallback mode is disabled, will use real implementation")
     
     try:
         logger.info("Attempting to import EconomicCalendarService from calendar.py...")
         from trading_bot.services.calendar_service.calendar import EconomicCalendarService
         logger.info("Successfully imported EconomicCalendarService from calendar.py")
         
-        # Test importeren van TradingView kalender
+        # Test importing TradingView calendar
         try:
             from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
             logger.info("Successfully imported TradingViewCalendarService")
-            
-            # Check if using OpenAI o4-mini
-            use_o4mini = os.environ.get("USE_OPENAI_O4MINI", "").lower() in ("true", "1", "yes")
-            logger.info(f"Using OpenAI o4-mini for calendar data: {use_o4mini}")
-            
-            if use_o4mini:
-                print("✅ Using OpenAI o4-mini for economic calendar data")
-            else:
-                print("⚠️ OpenAI o4-mini is disabled, using direct connection")
+            logger.info("Using direct TradingView API for calendar data")
             
         except Exception as e:
             logger.warning(f"TradingViewCalendarService import failed: {e}")
             logger.debug(traceback.format_exc())
-            print("⚠️ TradingView calendar service could not be imported")
+            logger.warning("TradingView calendar service could not be imported")
 
     except Exception as e:
-        # Als de import faalt, gebruiken we onze interne fallback implementatie
+        # If the import fails, use our internal fallback implementation
         logger.error(f"Could not import EconomicCalendarService from calendar.py: {str(e)}")
         logger.debug(traceback.format_exc())
         logger.warning("Using internal fallback implementation")
-        print("⚠️ Could not import real calendar service, using internal fallback")
         
-        # Gebruik interne fallback
+        # Use internal fallback
         EconomicCalendarService = InternalFallbackCalendarService
         
-        # Log dat we de fallback gebruiken
+        # Log that we're using the fallback
         logger.info("Successfully initialized internal fallback EconomicCalendarService")
 
-# Exporteer TradingView debug functie als die beschikbaar is
+# Export TradingView debug function if available
 try:
     from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
     
@@ -164,5 +136,5 @@ try:
 
     __all__ = ['EconomicCalendarService', 'debug_tradingview_api', 'get_all_calendar_events']
 except Exception:
-    # Als de import faalt, exporteren we alleen de EconomicCalendarService
+    # If the import fails, only export the EconomicCalendarService
     __all__ = ['EconomicCalendarService']
