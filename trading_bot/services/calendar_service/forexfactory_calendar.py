@@ -88,16 +88,55 @@ class ForexFactoryCalendarService:
             if should_refresh:
                 logger.info(f"Running ForexFactory calendar script for date {date_str}")
                 # Run the script to fetch fresh data
-                process = await asyncio.create_subprocess_exec(
-                    "python",
-                    self.script_path,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await process.communicate()
-                
-                if process.returncode != 0:
-                    logger.error(f"Failed to run ForexFactory script: {stderr.decode()}")
+                try:
+                    # First check if script exists and is executable
+                    if not os.path.exists(self.script_path):
+                        logger.error(f"Script not found at {self.script_path}")
+                        return []
+                    
+                    if not os.access(self.script_path, os.X_OK):
+                        logger.warning(f"Script at {self.script_path} is not executable, trying to run with Python")
+                    
+                    # Try to get the Python executable path
+                    python_path = sys.executable
+                    logger.info(f"Using Python executable: {python_path}")
+                    
+                    # Run the script
+                    process = await asyncio.create_subprocess_exec(
+                        python_path,
+                        self.script_path,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, stderr = await process.communicate()
+                    
+                    if process.returncode != 0:
+                        stderr_text = stderr.decode() if stderr else "No error output"
+                        logger.error(f"Failed to run ForexFactory script: {stderr_text}")
+                        logger.error(f"Script exit code: {process.returncode}")
+                        
+                        # Try to list the script directory
+                        try:
+                            script_dir = os.path.dirname(self.script_path)
+                            logger.info(f"Contents of script directory {script_dir}:")
+                            for file in os.listdir(script_dir):
+                                if "calendar" in file.lower() or "events" in file.lower():
+                                    logger.info(f"Found potential calendar file: {file}")
+                        except Exception as e:
+                            logger.error(f"Error listing script directory: {str(e)}")
+                        
+                        # Try to use existing file if available
+                        if not os.path.exists(json_file):
+                            return []
+                    else:
+                        stdout_text = stdout.decode() if stdout else "No output"
+                        logger.info(f"Script execution successful with output: {stdout_text[:100]}...")
+                except Exception as e:
+                    logger.error(f"Error executing ForexFactory script: {str(e)}")
+                    logger.error(f"Script path: {self.script_path}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    
                     # Try to use existing file if available
                     if not os.path.exists(json_file):
                         return []
