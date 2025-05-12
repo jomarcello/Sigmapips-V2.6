@@ -1164,3 +1164,89 @@ class Database:
             logger.error(f"Error getting all active users: {str(e)}")
             traceback.print_exc()
             return []
+
+    def check_bot_instance(self, instance_id):
+        """
+        Check if a bot instance is registered and active.
+        If not found, register this instance.
+        If found, update its heartbeat.
+        
+        Args:
+            instance_id: Unique identifier for this bot instance
+            
+        Returns:
+            tuple: (is_new_instance, is_active)
+                - is_new_instance: True if this is a new instance
+                - is_active: True if this instance should remain active
+        """
+        try:
+            # Create the bot_instances table if it doesn't exist
+            self.execute_query("""
+                CREATE TABLE IF NOT EXISTS bot_instances (
+                    instance_id VARCHAR(255) PRIMARY KEY,
+                    start_time TIMESTAMP NOT NULL,
+                    last_heartbeat TIMESTAMP NOT NULL,
+                    is_active BOOLEAN DEFAULT TRUE
+                )
+            """)
+            
+            # Check for active instances
+            active_instances = self.execute_query("""
+                SELECT instance_id, last_heartbeat 
+                FROM bot_instances 
+                WHERE is_active = TRUE AND 
+                      last_heartbeat > NOW() - INTERVAL '2 minutes'
+            """)
+            
+            # Get current time
+            import datetime
+            current_time = datetime.datetime.now()
+            
+            # Check if this instance is registered
+            instance_data = self.execute_query(
+                "SELECT instance_id, is_active FROM bot_instances WHERE instance_id = %s",
+                [instance_id]
+            )
+            
+            if not instance_data:
+                # This is a new instance
+                
+                # If there are active instances, don't activate this one
+                if active_instances and len(active_instances) > 0:
+                    # Register but don't activate
+                    self.execute_query(
+                        """
+                        INSERT INTO bot_instances 
+                        (instance_id, start_time, last_heartbeat, is_active) 
+                        VALUES (%s, %s, %s, FALSE)
+                        """,
+                        [instance_id, current_time, current_time]
+                    )
+                    return True, False
+                else:
+                    # No active instances, register and activate this one
+                    self.execute_query(
+                        """
+                        INSERT INTO bot_instances 
+                        (instance_id, start_time, last_heartbeat, is_active) 
+                        VALUES (%s, %s, %s, TRUE)
+                        """,
+                        [instance_id, current_time, current_time]
+                    )
+                    return True, True
+            else:
+                # Instance exists, update heartbeat
+                self.execute_query(
+                    "UPDATE bot_instances SET last_heartbeat = %s WHERE instance_id = %s",
+                    [current_time, instance_id]
+                )
+                
+                # Return current active status
+                return False, instance_data[0]['is_active']
+                
+        except Exception as e:
+            import logging
+            logging = logging.getLogger(__name__)
+            logging.error(f"Error checking bot instance: {e}")
+            # Default to active in case of error
+            return False, True
