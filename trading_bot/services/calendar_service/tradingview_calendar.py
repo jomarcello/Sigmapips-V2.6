@@ -846,13 +846,18 @@ async def format_calendar_for_telegram(events: List[Dict]) -> str:
                 if not event_time:
                     event_time = 'TBA'
                 
-                # Get event title with fallbacks
-                event_title = event.get('event', '')
+                # Get event title with more robust fallbacks
+                event_title = None
+                
+                # Try all possible fields where the title might be
+                for field in ['event', 'title', 'indicator', 'name', 'description']:
+                    if field in event and event[field]:
+                        event_title = event[field]
+                        break
+                
+                # If still no title found, use a default
                 if not event_title:
-                    event_title = event.get('title', '')
-                if not event_title and 'indicator' in event:
-                    event_title = event.get('indicator', '')
-                if not event_title:
+                    logger.warning(f"No title found for event: {json.dumps(event, default=str)[:200]}")
                     event_title = 'Unnamed Event'
                 
                 # Get impact with fallbacks
