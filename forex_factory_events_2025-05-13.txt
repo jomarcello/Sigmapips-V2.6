@@ -1,0 +1,29 @@
+ForexFactory Economic Calendar for Tuesday, May 13, 2025 (GMT+8)
+================================================================================
+
+| Tijd      | Valuta | Impact | Evenement                       | Actueel | Verwacht | Vorig    |
+|-----------|--------|--------|--------------------------------|---------|----------|----------|
+| 12:00am    | 🇬🇧 GBP   | 🟡      | MPC Member Taylor Speaks       |         |          |          |
+| 2:00am     | 🇺🇸 USD   | 🟡      | Federal Budget Balance         |         | 256.4B   | -160.5B  |
+| Tentative  | 🇺🇸 USD   | 🟡      | Loan Officer Survey            |         |          |          |
+| 7:01am     | 🇬🇧 GBP   | 🟡      | BRC Retail Sales Monitor y/y   |         | 2.4%     | 0.9%     |
+| 7:50am     | 🇯🇵 JPY   | 🟡      | BOJ Summary of Opinions        |         |          |          |
+|            | 🇯🇵 JPY   | 🟡      | M2 Money Stock y/y             |         | 0.6%     | 0.8%     |
+| 8:30am     | 🇦🇺 AUD   | 🟡      | Westpac Consumer Sentiment     |         |          | -6.0%    |
+| 9:30am     | 🇦🇺 AUD   | 🟡      | NAB Business Confidence        |         |          | -3       |
+| 11:35am    | 🇯🇵 JPY   | 🟡      | 30-y Bond Auction              |         |          | 2.41|3.0 |
+| 2:00pm     | 🇬🇧 GBP   | 🔴      | Claimant Count Change          |         | 22.3K    | 18.7K    |
+|            | 🇬🇧 GBP   | 🟠      | Average Earnings Index 3m/y    |         | 5.2%     | 5.6%     |
+|            | 🇬🇧 GBP   | 🟡      | Unemployment Rate              |         | 4.5%     | 4.4%     |
+| Tentative  | 🇨🇳 CNY   | 🟡      | New Loans                      |         | 710B     | 3640B    |
+| Tentative  | 🇨🇳 CNY   | 🟡      | M2 Money Supply y/y            |         | 7.2%     | 7.0%     |
+| All Day    | 🇪🇺 EUR   | 🟡      | ECOFIN Meetings                |         |          |          |
+| 4:45pm     | 🇬🇧 GBP   | 🟡      | MPC Member Pill Speaks         |         |          |          |
+| 5:00pm     | 🇪🇺 EUR   | 🟠      | German ZEW Economic Sentiment  |         | 10.7     | -14.0    |
+|            | 🇪🇺 EUR   | 🟡      | ZEW Economic Sentiment         |         | -3.5     | -18.5    |
+| 6:00pm     | 🇺🇸 USD   | 🟡      | NFIB Small Business Index      |         | 94.9     | 97.4     |
+| 8:30pm     | 🇺🇸 USD   | 🔴      | Core CPI m/m                   |         | 0.3%     | 0.1%     |
+|            | 🇺🇸 USD   | 🔴      | CPI m/m                        |         | 0.3%     | -0.1%    |
+|            | 🇺🇸 USD   | 🔴      | CPI y/y                        |         | 2.4%     | 2.4%     |
+| 9:30pm     | 🇬🇧 GBP   | 🟡      | CB Leading Index m/m           |         |          | -0.3%    |
+| 11:00pm    | 🇬🇧 GBP   | 🔴      | BOE Gov Bailey Speaks          |         |          |          |
