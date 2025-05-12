@@ -592,11 +592,18 @@ class TradingViewCalendarService:
                     if impact_value < min_impact_value:
                         continue
                     
+                    # Extract event title - First try 'indicator' field, then fall back to 'title'
+                    event_title = 'Unknown Event'
+                    if 'indicator' in item and item['indicator']:
+                        event_title = item['indicator']
+                    elif 'title' in item and item['title']:
+                        event_title = item['title']
+                    
                     # Create event object
                     event = {
                         "country": country_code,
                         "time": event_time_str,
-                        "event": item.get('title', 'Unknown Event'),
+                        "event": event_title,
                         "impact": impact,
                         "forecast": item.get('forecast', ''),
                         "previous": item.get('previous', ''),
@@ -831,78 +838,77 @@ async def format_calendar_for_telegram(events: List[Dict]) -> str:
     
     # Format the message
     message = "<b>📅 Economic Calendar</b>\n\n"
+    message += f"Date: {datetime.now().strftime('%b %d, %Y')}\n\n"
     
     # Add impact legend
     message += "<b>Impact:</b> 🔴 High   🟠 Medium   🟢 Low\n\n"
     
-    # Display events in chronological order without grouping by country
-    for i, event in enumerate(sorted_events):
-        try:
-            country = event.get("country", "")
-            time = event.get("time", "")
-            title = event.get("event", "")
-            impact = event.get("impact", "Low")
-            impact_emoji = IMPACT_EMOJI.get(impact, "🟢")
-            
-            # Check if this event is highlighted (specific to the requested currency)
-            is_highlighted = event.get("highlighted", False)
-            if is_highlighted:
-                event_counts["highlighted"] += 1
-            
-            # Log each event being processed for debugging
-            logger.debug(f"Processing event {i+1}: {json.dumps(event)}")
-            
-            # Controleer of alle benodigde velden aanwezig zijn
-            if not country or not time or not title:
-                missing = []
-                if not country: missing.append("country")
-                if not time: missing.append("time") 
-                if not title: missing.append("event")
+    # Group events by country for better readability
+    events_by_country = {}
+    for event in sorted_events:
+        country = event.get("country", "")
+        if country not in events_by_country:
+            events_by_country[country] = []
+        events_by_country[country].append(event)
+    
+    # Display events grouped by country
+    for country, country_events in events_by_country.items():
+        # Add country header
+        message += f" {country}\n"
+        
+        # Add events for this country
+        for i, event in enumerate(country_events):
+            try:
+                time = event.get("time", "")
+                title = event.get("event", "")
+                impact = event.get("impact", "Low")
+                impact_emoji = IMPACT_EMOJI.get(impact, "🟢")
                 
-                logger.warning(f"Event {i+1} missing fields: {', '.join(missing)}: {json.dumps(event)}")
-                event_counts["missing_fields"] += 1
+                # Check if this event is highlighted (specific to the requested currency)
+                is_highlighted = event.get("highlighted", False)
+                if is_highlighted:
+                    event_counts["highlighted"] += 1
+                
+                # Log each event being processed for debugging
+                if i < 5:
+                    logger.debug(f"Processing event {i+1} for {country}: {json.dumps(event)}")
+                
+                # Controleer of alle benodigde velden aanwezig zijn
+                if not time or not title:
+                    missing = []
+                    if not time: missing.append("time") 
+                    if not title: missing.append("event")
+                    
+                    logger.warning(f"Event {i+1} missing fields: {', '.join(missing)}: {json.dumps(event)}")
+                    event_counts["missing_fields"] += 1
+                    continue
+                
+                # Format the line with enhanced visibility
+                event_line = f"{time} - {impact_emoji} {title}"
+                
+                # Add previous/forecast/actual values if available
+                values = []
+                if "previous" in event and event["previous"] is not None:
+                    values.append(f"{event['previous']}")
+                if "forecast" in event and event["forecast"] is not None:
+                    values.append(f"Fcst: {event['forecast']}")
+                if "actual" in event and event["actual"] is not None:
+                    values.append(f"Act: {event['actual']}")
+                    
+                if values:
+                    event_line += f" ({', '.join(values)})"
+                    
+                message += event_line + "\n"
+                event_counts["valid"] += 1
+                
+            except Exception as e:
+                logger.error(f"Error formatting event {i+1}: {str(e)}")
+                logger.error(f"Problematic event: {json.dumps(event)}")
                 continue
-            
-            # Format the line with enhanced visibility for country - bold if highlighted
-            country_text = f"<b>{country}</b>" if is_highlighted else country
-            # Add a special marker for highlighted events to make them more visible
-            prefix = "➤ " if is_highlighted else ""
-            event_line = f"{time} - 「{country_text}」 - {prefix}{title} {impact_emoji}"
-            
-            # Add previous/forecast/actual values if available
-            values = []
-            if "previous" in event and event["previous"] is not None:
-                values.append(f"{event['previous']}")
-            if "forecast" in event and event["forecast"] is not None:
-                values.append(f"Fcst: {event['forecast']}")
-            if "actual" in event and event["actual"] is not None:
-                values.append(f"Act: {event['actual']}")
-                
-            if values:
-                event_line += f" ({', '.join(values)})"
-                
-            message += event_line + "\n"
-            event_counts["valid"] += 1
-            
-            # Log first few formatted events for debugging
-            if i < 5:
-                logger.info(f"Formatted event {i+1}: {event_line}")
-        except Exception as e:
-            logger.error(f"Error formatting event {i+1}: {str(e)}")
-            logger.error(f"Problematic event: {json.dumps(event)}")
-            continue
     
     if event_counts["valid"] == 0:
         logger.warning("No valid events to display in calendar")
         message += "No valid economic events found for today.\n"
-    
-    # Add legend with explanation of formatting
-    message += "\n-------------------\n"
-    message += "🔴 High Impact\n"
-    message += "🟠 Medium Impact\n"
-    message += "🟢 Low Impact\n"
-    # Add note about highlighted events
-    message += "➤ Primary currency events are in <b>bold</b>\n"
     
     # Log event counts
     logger.info(f"Telegram formatting: {event_counts['valid']} valid events, {event_counts['highlighted']} highlighted events, {event_counts['missing_fields']} skipped due to missing fields")
