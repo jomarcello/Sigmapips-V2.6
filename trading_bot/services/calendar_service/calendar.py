@@ -42,13 +42,24 @@ from trading_bot.services.sentiment_service.sentiment import MarketSentimentServ
 from trading_bot.services.payment_service.stripe_service import StripeService
 from trading_bot.services.payment_service.stripe_config import get_subscription_features
 
-# Import TradingView calendar service
+# Import ForexFactory calendar service
 try:
-    from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
-    logger.info("Successfully imported TradingViewCalendarService")
+    from trading_bot.services.calendar_service.forexfactory_calendar import ForexFactoryCalendarService
+    logger.info("Successfully imported ForexFactoryCalendarService")
+    HAS_FOREXFACTORY = True
 except ImportError:
-    logger.error("Failed to import TradingViewCalendarService")
-    TradingViewCalendarService = None
+    logger.error("Failed to import ForexFactoryCalendarService")
+    HAS_FOREXFACTORY = False
+    ForexFactoryCalendarService = None
+
+# Fallback to TradingView calendar service if ForexFactory is not available
+if not HAS_FOREXFACTORY:
+    try:
+        from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
+        logger.info("Successfully imported TradingViewCalendarService as fallback")
+    except ImportError:
+        logger.error("Failed to import TradingViewCalendarService")
+        TradingViewCalendarService = None
 
 # Import chronological formatter if available
 try:
@@ -141,23 +152,24 @@ IMPACT_EMOJI = {
 
 class EconomicCalendarService:
     """
-    Service for retrieving economic calendar data from TradingView API.
+    Service for retrieving economic calendar data from ForexFactory or TradingView API.
     
     This service provides methods to fetch and format economic calendar events
-    for display in various formats. It uses the TradingView API as the primary
-    data source with optional fallback mechanisms.
+    for display in various formats. It uses the ForexFactory as the primary
+    data source with fallback to TradingView API.
     """
     
     def __init__(self):
         """
-        Initialize the calendar service with the TradingView implementation.
+        Initialize the calendar service with the ForexFactory implementation.
         
-        Sets up the TradingView calendar service and configures caching and
+        Sets up the ForexFactory calendar service and configures caching and
         fallback options based on environment variables.
         """
         self.logger = logging.getLogger(__name__)
         
-        # Initialize only the TradingView calendar service
+        # Initialize ForexFactory calendar service with fallback to TradingView
+        self.forexfactory_service = None
         self.tradingview_service = None
         
         # Enable fallback mode if environment variable is set
@@ -165,17 +177,31 @@ class EconomicCalendarService:
         if self.use_fallback:
             self.logger.info("Calendar fallback mode is enabled")
         
-        # Try to initialize TradingView calendar service
+        # Try to initialize ForexFactory calendar service
         try:
-            self.tradingview_service = TradingViewCalendarService()
-            self.logger.info("TradingView calendar service initialized")
+            if HAS_FOREXFACTORY:
+                self.forexfactory_service = ForexFactoryCalendarService()
+                self.logger.info("ForexFactory calendar service initialized")
         except Exception as e:
-            self.logger.warning(f"Could not initialize TradingView calendar service: {str(e)}")
+            self.logger.warning(f"Could not initialize ForexFactory calendar service: {str(e)}")
             self.logger.debug(traceback.format_exc())
         
-        # Use the TradingView service as calendar_service
-        self.calendar_service = self.tradingview_service
-        self.logger.info("Using TradingView API for economic calendar")
+        # Try to initialize TradingView calendar service as fallback
+        if self.forexfactory_service is None:
+            try:
+                self.tradingview_service = TradingViewCalendarService()
+                self.logger.info("TradingView calendar service initialized as fallback")
+            except Exception as e:
+                self.logger.warning(f"Could not initialize TradingView calendar service: {str(e)}")
+                self.logger.debug(traceback.format_exc())
+        
+        # Use ForexFactory as primary, with TradingView as fallback
+        if self.forexfactory_service:
+            self.calendar_service = self.forexfactory_service
+            self.logger.info("Using ForexFactory for economic calendar")
+        else:
+            self.calendar_service = self.tradingview_service
+            self.logger.info("Using TradingView API for economic calendar")
         
         # Setup caching
         self.cache = {}
@@ -197,6 +223,8 @@ class EconomicCalendarService:
         """
         if service is None:
             return "None"
+        elif isinstance(service, ForexFactoryCalendarService):
+            return "ForexFactory"
         else:
             return "TradingView"
     
