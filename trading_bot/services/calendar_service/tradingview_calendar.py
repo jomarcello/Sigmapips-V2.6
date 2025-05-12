@@ -230,7 +230,7 @@ class TradingViewCalendarService:
         
         # Bereid ScrapingAnt request parameters voor - zorg dat 'url' correct is
         scrapingant_params = {
-            "url": urllib.parse.quote(full_url, safe=''),  # Ensure URL is properly encoded
+            "url": full_url,  # Use the full URL directly without encoding
             "browser": True,
             "return_page_source": True,
             "headers": {
@@ -248,9 +248,8 @@ class TradingViewCalendarService:
         # Maak request naar ScrapingAnt
         await self._ensure_session()
         try:
-            # According to ScrapingAnt docs, the API key should be passed as a query parameter
-            # Add API key to the URL as a query parameter
-            scrapingant_url_with_key = f"{self.scrapingant_url}?x-api-key={self.scrapingant_api_key}"
+            # According to ScrapingAnt docs, the API key should be passed as a header
+            headers = {"x-api-key": self.scrapingant_api_key}
             
             # Validate the JSON request body before sending
             try:
@@ -263,8 +262,9 @@ class TradingViewCalendarService:
                 return None
             
             async with self.session.post(
-                scrapingant_url_with_key,
+                self.scrapingant_url,
                 json=scrapingant_params,
+                headers=headers,
                 timeout=aiohttp.ClientTimeout(total=60)
             ) as response:
                 logger.info(f"ScrapingAnt response status: {response.status}")

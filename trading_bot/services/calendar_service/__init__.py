@@ -35,15 +35,30 @@ os.environ["USE_CALENDAR_FALLBACK"] = "false"
 logger.info("⚠️ Forcing USE_CALENDAR_FALLBACK=false to use real data")
 print("⚠️ Forcing USE_CALENDAR_FALLBACK=false to use real data")
 
-# ScrapingAnt inschakelen voor betere data
-os.environ["USE_SCRAPINGANT"] = "true"
-logger.info("⚠️ Forcing USE_SCRAPINGANT=true for better data retrieval")
-print("⚠️ Forcing USE_SCRAPINGANT=true for better data retrieval")
+# ScrapingAnt uitschakelen en OpenAI o4-mini inschakelen
+os.environ["USE_SCRAPINGANT"] = "false"
+os.environ["USE_OPENAI_O4MINI"] = "true"
+logger.info("⚠️ Disabling ScrapingAnt and enabling OpenAI o4-mini for economic calendar data")
+print("⚠️ Disabling ScrapingAnt and enabling OpenAI o4-mini for economic calendar data")
 
-# ScrapingAnt API key configureren indien niet al gedaan
-if os.environ.get("SCRAPINGANT_API_KEY") is None:
-    os.environ["SCRAPINGANT_API_KEY"] = "e63e79e708d247c798885c0c320f9f30"
-    logger.info("Setting default ScrapingAnt API key")
+# Force the use of TradingView calendar service
+os.environ["USE_TRADINGVIEW_CALENDAR"] = "true"
+logger.info("⚠️ Forcing USE_TRADINGVIEW_CALENDAR=true to use TradingView economic calendar")
+print("⚠️ Forcing USE_TRADINGVIEW_CALENDAR=true to use TradingView economic calendar")
+
+# Disable BrowserBase services
+os.environ["BROWSERBASE_API_KEY"] = ""
+os.environ["BROWSERBASE_PROJECT_ID"] = ""
+logger.info("⚠️ Disabling BrowserBase services to ensure TradingView is used")
+print("⚠️ Disabling BrowserBase services to ensure TradingView is used")
+
+# Controleer of OpenAI API key is ingesteld
+if os.environ.get("OPENAI_API_KEY") is None:
+    logger.warning("⚠️ OPENAI_API_KEY is not set, some features may not work correctly")
+    print("⚠️ OPENAI_API_KEY is not set, some features may not work correctly")
+else:
+    logger.info("✅ OPENAI_API_KEY is set and will be used for o4-mini integration")
+    print("✅ OPENAI_API_KEY is set and will be used for o4-mini integration")
 
 # Check of er iets expliciets in de omgeving is ingesteld voor fallback
 USE_FALLBACK = False  # We willen de echte implementatie gebruiken, niet de fallback
@@ -100,14 +115,14 @@ else:
             from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
             logger.info("Successfully imported TradingViewCalendarService")
             
-            # Check if using ScrapingAnt
-            use_scrapingant = os.environ.get("USE_SCRAPINGANT", "").lower() in ("true", "1", "yes")
-            logger.info(f"Using ScrapingAnt for calendar API: {use_scrapingant}")
+            # Check if using OpenAI o4-mini
+            use_o4mini = os.environ.get("USE_OPENAI_O4MINI", "").lower() in ("true", "1", "yes")
+            logger.info(f"Using OpenAI o4-mini for calendar data: {use_o4mini}")
             
-            if use_scrapingant:
-                print("✅ Using ScrapingAnt proxy for TradingView calendar API")
+            if use_o4mini:
+                print("✅ Using OpenAI o4-mini for economic calendar data")
             else:
-                print("✅ Using direct connection for TradingView calendar API")
+                print("⚠️ OpenAI o4-mini is disabled, using direct connection")
             
         except Exception as e:
             logger.warning(f"TradingViewCalendarService import failed: {e}")
