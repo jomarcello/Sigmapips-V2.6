@@ -318,126 +318,132 @@ class TradingViewProvider:
 
     @staticmethod
     async def get_market_data(symbol: str, timeframe: str = "1h", limit: int = 100) -> Optional[Tuple[pd.DataFrame, Dict]]:
-        """
-        Haal marktdata inclusief technische indicatoren op voor het gegeven symbool
+        """Get market data for a symbol from TradingView"""
+        logger.info(f"[TradingView] Getting market data for {symbol} ({timeframe}) with limit {limit}")
         
-        Args:
-            symbol: Het handelssymbool (bijv. EURUSD, AAPL)
-            timeframe: Het tijdsinterval (1m, 5m, 15m, 30m, 1h, 1d, 1wk, 1mo)
-            limit: Maximaal aantal datapunten (niet relevant voor real-time data)
+        # Check cache first for faster response
+        cache_key = f"{symbol}_{timeframe}_{limit}"
+        if cache_key in market_data_cache:
+            cache_entry = market_data_cache[cache_key]
+            cache_time = cache_entry.get("time", 0)
             
-        Returns:
-            Tuple[pd.DataFrame, Dict]: (Dataframe met marktdata, dict met indicatoren)
-        """
+            # Determine max cache time based on timeframe
+            max_cache_time = 30  # Default 30 seconds
+            if timeframe == "1m": max_cache_time = 30
+            elif timeframe in ["5m", "15m"]: max_cache_time = 60
+            elif timeframe == "30m": max_cache_time = 120
+            elif timeframe == "1h": max_cache_time = 300
+            elif timeframe in ["4h", "1d"]: max_cache_time = 1800
+            
+            # If cache is still valid
+            if time.time() - cache_time < max_cache_time:
+                logger.info(f"[TradingView] Using cached data for {symbol}")
+                return cache_entry.get("data", None)
+        
         try:
-            logger.info(f"[TradingView] Getting market data for {symbol} ({timeframe}) with limit {limit}")
-            
-            # Check if we can use the enhanced TradingView
+            # Check if we have the enhanced TradingView implementation
             if HAS_ENHANCED_TRADINGVIEW:
                 logger.info(f"[TradingView] Using EnhancedTradingView for accurate market data")
                 
-                # Get data with accurate daily high/low
-                enhanced_result = EnhancedTradingView.get_accurate_market_data(symbol, timeframe)
+                # Execute in thread pool to avoid blocking
+                loop = asyncio.get_running_loop()
                 
-                if enhanced_result:
-                    df, metadata = enhanced_result
+                # Create a task with timeout to prevent long-running operations
+                try:
+                    # Use a shorter timeout to prevent hanging
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda: EnhancedTradingView.get_accurate_market_data(symbol, timeframe)),
+                        timeout=5.0  # 5 second timeout
+                    )
                     
-                    logger.info(f"[TradingView] Successfully retrieved ENHANCED data for {symbol}")
-                    logger.info(f"[TradingView] Daily high: {metadata['daily_high']}, Daily low: {metadata['daily_low']}, Current: {metadata['close']}")
-                    
-                    return df, metadata
-                else:
-                    logger.warning(f"[TradingView] Enhanced market data failed, falling back to regular analysis")
+                    if result:
+                        df, metadata = result
+                        
+                        # Log the high/low values for debugging
+                        logger.info(f"[TradingView] REAL TV data: Current={metadata.get('close')}, Daily High={metadata.get('daily_high')}, Daily Low={metadata.get('daily_low')}")
+                        
+                        # Store in cache
+                        market_data_cache[cache_key] = {
+                            "time": time.time(),
+                            "data": result
+                        }
+                        
+                        logger.info(f"[TradingView] Successfully retrieved ENHANCED data for {symbol}")
+                        
+                        # Log daily high/low values
+                        logger.info(f"[TradingView] Daily high: {metadata.get('daily_high')}, Daily low: {metadata.get('daily_low')}, Current: {metadata.get('close')}")
+                        
+                        return result
+                except asyncio.TimeoutError:
+                    logger.warning(f"[TradingView] EnhancedTradingView request timed out after 5 seconds for {symbol}")
+                except Exception as e:
+                    logger.error(f"[TradingView] Error with EnhancedTradingView: {str(e)}")
             
-            # Fallback: Get technical analysis via regular method
-            analysis = await TradingViewProvider.get_technical_analysis(symbol, timeframe)
-            
-            if "error" in analysis:
-                logger.error(f"[TradingView] Error getting analysis: {analysis['error']}")
-                return None
+            # Fallback to traditional TradingView TA if enhanced version fails
+            if HAS_TRADINGVIEW_TA:
+                logger.info(f"[TradingView] Falling back to standard TradingView TA for {symbol}")
                 
-            # Extract price data
-            indicators = analysis.get("indicators", {})
-            logger.info(f"[TradingView] Received indicators: {indicators.keys()}")
+                # Format symbol for TradingView
+                symbol_formatted, screener, exchange = TradingViewProvider._format_symbol(symbol)
+                interval = TradingViewProvider._map_timeframe(timeframe)
+                
+                # Create handler
+                handler = TA_Handler(
+                    symbol=symbol_formatted,
+                    screener=screener,
+                    exchange=exchange,
+                    interval=interval
+                )
+                
+                # Get analysis with timeout
+                loop = asyncio.get_running_loop()
+                try:
+                    analysis = await asyncio.wait_for(
+                        loop.run_in_executor(None, handler.get_analysis),
+                        timeout=3.0  # 3 second timeout
+                    )
+                    
+                    # Extract indicators
+                    indicators = analysis.indicators
+                    
+                    # Create a DataFrame with minimal data
+                    now = datetime.now()
+                    df = pd.DataFrame({
+                        'Open': [indicators.get("open", indicators.get("close", 0))],
+                        'High': [indicators.get("high", indicators.get("close", 0) * 1.001)],
+                        'Low': [indicators.get("low", indicators.get("close", 0) * 0.999)],
+                        'Close': [indicators.get("close", 0)],
+                        'Volume': [indicators.get("volume", 0)]
+                    }, index=[now])
+                    
+                    # Create metadata with indicators
+                    metadata = {
+                        "close": indicators.get("close", 0),
+                        "daily_high": indicators.get("high", None),
+                        "daily_low": indicators.get("low", None),
+                        "recommendation": analysis.summary.get("RECOMMENDATION", "NEUTRAL")
+                    }
+                    
+                    # Store in cache
+                    result = (df, metadata)
+                    market_data_cache[cache_key] = {
+                        "time": time.time(),
+                        "data": result
+                    }
+                    
+                    logger.info(f"[TradingView] Successfully retrieved standard data for {symbol}")
+                    return result
+                    
+                except asyncio.TimeoutError:
+                    logger.warning(f"[TradingView] Standard TradingView request timed out after 3 seconds for {symbol}")
+                except Exception as e:
+                    logger.error(f"[TradingView] Error with standard TradingView: {str(e)}")
             
-            # ALLEEN ECHTE DATA GEBRUIKEN - GEEN MOCK/FALLBACK DATA
-            # Extract de werkelijke waarden die TradingView teruggeeft
-            close_price = indicators.get("close")
-            open_price = indicators.get("open")
-            high_price = indicators.get("high")
-            low_price = indicators.get("low")
-            volume = indicators.get("Volume", 0)
-            
-            # Haal dagelijkse high/low direct uit de indicators (die nu accurater zijn dankzij onze aanpassingen)
-            daily_high = indicators.get("daily_high")  
-            daily_low = indicators.get("daily_low")
-            
-            # Als deze niet beschikbaar zijn, gebruik dan de huidige candle high/low waardes
-            if daily_high is None:
-                daily_high = high_price
-                logger.info(f"[TradingView] Using current high as daily high: {daily_high}")
-            
-            if daily_low is None:
-                daily_low = low_price
-                logger.info(f"[TradingView] Using current low as daily low: {daily_low}")
-            
-            # Log de echte waarden
-            logger.info(f"[TradingView] REAL data from TradingView - Open: {open_price}, High: {high_price}, Low: {low_price}, Close: {close_price}")
-            logger.info(f"[TradingView] Daily range - High: {daily_high}, Low: {daily_low}")
-            
-            # Als een van de essentiële prijscomponenten ontbreekt, geef dit aan en return None
-            if close_price is None or high_price is None or low_price is None or open_price is None:
-                logger.error(f"[TradingView] Missing essential price data for {symbol}. Only returning what TradingView provided.")
-                logger.error(f"[TradingView] Available data: Close: {close_price}, High: {high_price}, Low: {low_price}, Open: {open_price}")
-                return None
-            
-            # Maak een DataFrame met alleen de echte gegevens van dit moment
-            now = datetime.now()
-            data = {
-                'Open': [open_price],
-                'High': [high_price],
-                'Low': [low_price],
-                'Close': [close_price],
-                'Volume': [volume]
-            }
-            df = pd.DataFrame(data, index=[now])
-            
-            # Format the technical analysis indicators met ALLEEN ECHTE DATA
-            analysis_info = {
-                # Alleen echte data gebruiken
-                "close": close_price,
-                "open": open_price,
-                "high": high_price,
-                "low": low_price,
-                # Gebruik de gevonden daily high/low waarden
-                "daily_high": daily_high,
-                "daily_low": daily_low,
-                # Gebruik echte indicator data
-                "rsi": indicators.get("RSI"),
-                "macd": indicators.get("MACD.macd"),
-                "macd_signal": indicators.get("MACD.signal"),
-                "stochastic_k": indicators.get("Stoch.K"),
-                "stochastic_d": indicators.get("Stoch.D"),
-                "adx": indicators.get("ADX"),
-                "atr": indicators.get("ATR"),
-                # Indicator data voor moving averages indien beschikbaar
-                "ema_5": indicators.get("EMA5"),
-                "ema_10": indicators.get("EMA10"),
-                "ema_20": indicators.get("EMA20"),
-                "ema_50": indicators.get("EMA50"),
-                "ema_100": indicators.get("EMA100"),
-                "ema_200": indicators.get("EMA200"),
-                # Meer TradingView data
-                "summary": analysis.get("summary", {}),
-                "recommendation": analysis.get("summary", {}).get("RECOMMENDATION", "NEUTRAL"),
-                "moving_averages": analysis.get("moving_averages", {}),
-                "oscillators": analysis.get("oscillators", {})
-            }
-            
-            logger.info(f"[TradingView] Successfully retrieved REAL data for {symbol}, close price: {close_price}")
-            return df, analysis_info
+            # If all methods fail
+            logger.error(f"[TradingView] Failed to get data for {symbol} on {timeframe}")
+            return None
             
         except Exception as e:
-            logger.error(f"[TradingView] Error in get_market_data for {symbol}: {str(e)}")
-            logger.error(f"[TradingView] {traceback.format_exc()}")
+            logger.error(f"[TradingView] Error getting market data: {str(e)}")
+            logger.error(traceback.format_exc())
             return None 

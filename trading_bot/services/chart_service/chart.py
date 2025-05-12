@@ -204,27 +204,37 @@ class ChartService:
             
             # Attempt to get TradingView screenshot first (preferred method)
             screenshot_bytes = None
-            try:
-                # Get the TradingView URL for this instrument
-                tv_url = self.get_tradingview_url(instrument, timeframe)
-                
-                if tv_url:
-                    logger.info(f"Attempting to capture TradingView screenshot for {instrument}")
-                    # Directly call the screenshot method (browser_service is now just a flag)
-                    screenshot_bytes = await self._capture_tradingview_screenshot(tv_url, instrument)
+            
+            # Get the TradingView URL for this instrument
+            tv_url = self.get_tradingview_url(instrument, timeframe)
+            
+            if tv_url:
+                logger.info(f"Attempting to capture TradingView screenshot for {instrument}")
+                # Directly call the screenshot method with a timeout to prevent long-running operations
+                try:
+                    # Create a task with timeout to prevent hanging
+                    screenshot_task = asyncio.create_task(self._capture_tradingview_screenshot(tv_url, instrument))
+                    screenshot_bytes = await asyncio.wait_for(screenshot_task, timeout=15.0)  # 15 second timeout
                     
                     if screenshot_bytes:
                         logger.info(f"Successfully captured TradingView screenshot for {instrument}")
                         # Cache the chart
                         self.chart_cache[cache_key] = (time.time(), screenshot_bytes)
+                        
+                        # Calculate and log execution time
+                        execution_time = time.time() - start_time
+                        logger.info(f"Chart generation for {instrument} completed in {execution_time:.2f} seconds")
+                        
                         return screenshot_bytes
                     else:
                         logger.warning(f"TradingView screenshot capture failed for {instrument}")
-                else:
-                    logger.warning(f"No TradingView URL available for {instrument}")
-            except Exception as e:
-                logger.error(f"Error getting TradingView screenshot: {str(e)}")
-                logger.error(traceback.format_exc())
+                except asyncio.TimeoutError:
+                    logger.warning(f"TradingView screenshot capture timed out after 15 seconds for {instrument}")
+                except Exception as e:
+                    logger.error(f"Error getting TradingView screenshot: {str(e)}")
+                    logger.error(traceback.format_exc())
+            else:
+                logger.warning(f"No TradingView URL available for {instrument}")
             
             # Try to get data from appropriate provider for this market type
             if market_type == "crypto":
@@ -232,7 +242,10 @@ class ChartService:
                     if isinstance(provider, BinanceProvider):
                         try:
                             logger.info(f"Attempting to get crypto data from Binance for {instrument}")
-                            market_data = await provider.get_market_data(instrument, timeframe=timeframe)
+                            # Set a timeout for the binance request
+                            binance_task = asyncio.create_task(provider.get_market_data(instrument, timeframe=timeframe))
+                            market_data = await asyncio.wait_for(binance_task, timeout=5.0)  # 5 second timeout
+                            
                             if market_data is not None and not isinstance(market_data, str) and not market_data.empty:
                                 logger.info(f"Creating chart from Binance data for {instrument}")
                                 # Generate custom chart with matplotlib
@@ -240,23 +253,37 @@ class ChartService:
                                 if chart_bytes:
                                     # Cache the chart
                                     self.chart_cache[cache_key] = (time.time(), chart_bytes)
+                                    
+                                    # Calculate and log execution time
+                                    execution_time = time.time() - start_time
+                                    logger.info(f"Chart generation for {instrument} completed in {execution_time:.2f} seconds")
+                                    
                                     return chart_bytes
+                        except asyncio.TimeoutError:
+                            logger.warning(f"Binance data request timed out for {instrument}")
                         except Exception as e:
                             logger.error(f"Error generating chart from Binance data: {str(e)}")
             
             # If all methods fail, create an emergency chart
             logger.warning(f"All chart generation methods failed for {instrument}, creating emergency chart")
             emergency_chart = await self._create_emergency_chart(instrument, timeframe)
+            
+            # Calculate and log execution time
+            execution_time = time.time() - start_time
+            logger.info(f"Chart generation for {instrument} completed in {execution_time:.2f} seconds")
+            
             return emergency_chart
-                    
+            
         except Exception as e:
             logger.error(f"Error in get_chart: {str(e)}")
             logger.error(traceback.format_exc())
-            # Create an emergency chart
-            return await self._create_emergency_chart(instrument, timeframe)
-        finally:
-            elapsed_time = time.time() - start_time
-            logger.info(f"Chart generation for {instrument} completed in {elapsed_time:.2f} seconds")
+            
+            # Calculate and log execution time even on error
+            execution_time = time.time() - start_time
+            logger.info(f"Chart generation for {instrument} failed in {execution_time:.2f} seconds")
+            
+            # Return fallback chart on error
+            return self.get_fallback_chart(instrument)
 
     async def _create_emergency_chart(self, instrument: str, timeframe: str = "1h") -> bytes:
         """Create an emergency chart with a message when all chart generation methods fail."""
@@ -507,20 +534,34 @@ class ChartService:
             # Launch playwright
             async with async_playwright() as p:
                 try:
-                    # Launch browser
+                    # Launch browser with optimized settings
                     browser = await p.chromium.launch(
                         headless=True, 
-                        args=['--no-sandbox', '--disable-dev-shm-usage']
+                        args=[
+                            '--no-sandbox',
+                            '--disable-dev-shm-usage',
+                            '--disable-extensions',
+                            '--disable-gpu',
+                            '--disable-infobars',
+                            '--disable-notifications',
+                            '--disable-translate',
+                            '--disable-features=site-per-process',
+                            '--disable-web-security',
+                            '--js-flags=--max-old-space-size=512'  # Limit memory usage
+                        ]
                     )
                 except Exception as browser_e:
                     logger.error(f"Failed to launch browser: {str(browser_e)}")
                     return None
 
                 try:
-                    # Create browser context
+                    # Create browser context with optimized settings
                     context = await browser.new_context(
                         viewport={"width": 1280, "height": 800},
-                        device_scale_factor=1
+                        device_scale_factor=1,
+                        bypass_csp=True,  # Bypass Content Security Policy for faster loading
+                        java_script_enabled=True,
+                        ignore_https_errors=True
                     )
                     
                     # Get the session ID from environment
@@ -539,69 +580,63 @@ class ChartService:
                     else:
                         logger.warning("No TradingView session ID found in environment variables")
                     
-                    # Create page
+                    # Create page with reduced timeout
                     page = await context.new_page()
+                    
+                    # Set default timeout for all operations to be shorter
+                    page.set_default_timeout(10000)  # 10 seconds timeout
+                    
                 except Exception as page_e:
                     logger.error(f"Failed to setup browser context: {str(page_e)}")
                     await browser.close()
                     return None
 
                 try:
-                    # Navigate to URL
-                    await page.goto(url, timeout=45000)
+                    # Navigate to URL with reduced timeout and wait for network to be idle
+                    await page.goto(url, timeout=15000, wait_until='networkidle')
                     
-                    # Dismiss dialogs
+                    # Dismiss dialogs immediately
                     await page.keyboard.press("Escape")
                     
-                    # Wait for chart to load
+                    # Inject JavaScript to disable animations and speed up rendering
+                    await page.evaluate("""
+                    () => {
+                        // Disable animations
+                        const style = document.createElement('style');
+                        style.type = 'text/css';
+                        style.innerHTML = '* { animation-duration: 0s !important; transition-duration: 0s !important; }';
+                        document.head.appendChild(style);
+                        
+                        // Disable auto-updates
+                        if (window.TradingView && window.TradingView.ChartApiInstance) {
+                            window.TradingView.ChartApiInstance.prototype.autoUpdate = function() {};
+                        }
+                    }
+                    """)
+                    
+                    # Wait for chart to load - use a single selector with shorter timeout
                     logger.info("Waiting for chart to load...")
                     try:
-                        # Try different selectors
-                        for selector in ['.chart-container', '.chart-markup-table', '.price-axis', '.chart-widget']:
-                            try:
-                                await page.wait_for_selector(selector, timeout=10000)
-                                logger.info(f"Found chart element: {selector}")
-                                break
-                            except:
-                                continue
-                                
-                        # Wait for indicator elements to appear
-                        logger.info("Waiting for indicators to appear...")
-                        indicator_selectors = [
-                            '.pane-legend-line', 
-                            '.pane-legend-item-value-wrap',
-                            '.study-pane',
-                            '.pane-legend-line__value'
-                        ]
+                        # Try to find the chart container with a single wait
+                        await page.wait_for_selector('.chart-container, .chart-markup-table, .price-axis, .chart-widget', timeout=8000)
+                        logger.info(f"Found chart element: .chart-container")
                         
-                        for selector in indicator_selectors:
-                            try:
-                                await page.wait_for_selector(selector, timeout=2000)
-                                logger.info(f"Found indicator element: {selector}")
-                                break
-                            except Exception as ind_e:
-                                logger.warning(f"Couldn't find indicator element {selector}: {str(ind_e)}")
-                                continue
+                        # Wait for indicators to appear - use a shorter timeout
+                        logger.info("Waiting for indicators to appear...")
+                        await page.wait_for_selector('.pane-legend-line, .pane-legend-item-value-wrap, .study-pane, .pane-legend-line__value', timeout=1000, state='attached')
                     except Exception as wait_e:
                         logger.warning(f"Wait error: {str(wait_e)}, continuing anyway")
                     
-                    # Give time for chart to fully render
-                    logger.info("Waiting for indicators to fully render...")
-                    await page.wait_for_timeout(3000)
+                    # Minimal wait time - just enough for the chart to stabilize
+                    logger.info("Brief wait for chart to stabilize...")
+                    await page.wait_for_timeout(500)
                     
-                    # Try to go fullscreen
-                    try:
-                        await page.keyboard.press("Shift+F")
-                        await page.wait_for_timeout(1000)
-                    except:
-                        logger.warning("Couldn't enter fullscreen, continuing anyway")
-                    
-                    # Take screenshot
+                    # Take screenshot with optimized settings
                     logger.info(f"Taking screenshot for {instrument} now...")
-                    screenshot_bytes = await page.screenshot(type='jpeg', quality=90)
+                    screenshot_bytes = await page.screenshot(type='jpeg', quality=80)  # Reduced quality for faster processing
                     logger.info(f"Screenshot taken, size: {len(screenshot_bytes) / 1024:.2f} KB")
                     
-                    # Close browser
+                    # Close browser immediately
                     await browser.close()
                     logger.info("Browser closed")
                     
@@ -1287,64 +1322,66 @@ Moving Averages: {ma_analysis}
         return "forex"
 
     def get_tradingview_url(self, instrument: str, timeframe: str = '1h') -> str:
-        """Get TradingView URL for a specific instrument and timeframe.
+        """Get TradingView URL for an instrument with specific timeframe"""
         
-        Args:
-            instrument: The instrument symbol.
-            timeframe: The chart timeframe (1h, 4h, 1d, etc.)
-        
-        Returns:
-            The TradingView URL with the correct timeframe or empty string if not found.
-        """
-        # Check if this instrument is in our chart_links dictionary
-        if instrument not in self.chart_links:
-            logger.warning(f"No TradingView URL found for {instrument}")
-            return ""
+        # Normalize timeframe for URL
+        tv_interval = timeframe.lower()
+        if tv_interval == "1d":
+            tv_interval = "D"
+        elif tv_interval == "1w":
+            tv_interval = "W"
+        elif tv_interval == "1m":
+            tv_interval = "1"
+        elif tv_interval == "1h":
+            tv_interval = "60"
+        elif tv_interval == "4h":
+            tv_interval = "240"
+        elif tv_interval == "1M":
+            tv_interval = "M"
             
-        # Get the base URL from chart_links
-        base_url = self.chart_links[instrument]
+        # Check if we have a specific chart URL for this instrument
+        if instrument in self.chart_links:
+            base_url = self.chart_links[instrument]
+            # Add timeframe parameter if not already in URL
+            if "interval=" not in base_url:
+                url = f"{base_url}?interval={tv_interval}&theme=dark&force_reload=true"
+            else:
+                # Replace existing interval
+                url = re.sub(r'interval=[^&]*', f'interval={tv_interval}', base_url)
+                if "&theme=dark" not in url:
+                    url += "&theme=dark"
+                if "&force_reload=true" not in url:
+                    url += "&force_reload=true"
+            
+            logger.info(f"Using TradingView URL: {url}")
+            return url
         
-        # Map timeframe to TradingView format
-        tv_timeframe_map = {
-            '1h': '60',
-            '4h': '240',
-            '1d': 'D',
-            '5m': '5',
-            '15m': '15',
-            '30m': '30',
-            '1w': 'W'
-        }
-        tv_timeframe = tv_timeframe_map.get(timeframe, timeframe)
+        # Fallback to default URL with instrument as symbol
+        market_type = self._detect_market_type_sync(instrument)
         
-        # Parse URL components to properly add parameters
-        url_parts = base_url.split('?')
-        base_url = url_parts[0]
-        params = {}
+        # Use a fixed chart ID for consistency and faster loading
+        chart_id = "zmsuvPgj"
         
-        # Parse existing parameters
-        if len(url_parts) > 1:
-            query_string = url_parts[1]
-            for param in query_string.split('&'):
-                if '=' in param:
-                    key, value = param.split('=', 1)
-                    params[key] = value
+        # Format URL based on market type
+        if market_type == "forex":
+            # Use FX_IDC for forex
+            url = f"https://www.tradingview.com/chart/{chart_id}/?symbol=FX_IDC%3A{instrument}&interval={tv_interval}&theme=dark"
+        elif market_type == "crypto":
+            # Use Binance for crypto
+            symbol = instrument
+            if symbol.endswith("USD") and not symbol.endswith("USDT"):
+                symbol = f"{symbol}T"  # Convert BTCUSD to BTCUSDT for Binance
+            url = f"https://www.tradingview.com/chart/{chart_id}/?symbol=BINANCE%3A{symbol}&interval={tv_interval}&theme=dark"
+        elif market_type == "commodity":
+            # Use TVC for commodities
+            symbol = "GOLD" if instrument == "XAUUSD" else "SILVER" if instrument == "XAGUSD" else "USOIL" if instrument == "XTIUSD" else instrument
+            url = f"https://www.tradingview.com/chart/{chart_id}/?symbol=TVC%3A{symbol}&interval={tv_interval}&theme=dark"
+        else:
+            # Default to FX_IDC
+            url = f"https://www.tradingview.com/chart/{chart_id}/?symbol=FX_IDC%3A{instrument}&interval={tv_interval}&theme=dark"
         
-        # Add essential parameters
-        params['interval'] = tv_timeframe
-        
-        # Add theme parameter for consistency
-        params['theme'] = 'dark'
-        
-        # Force reload parameter to bypass cache
-        params['force_reload'] = 'true'
-        
-        # Rebuild the URL with all params
-        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-        final_url = f"{base_url}?{query_string}"
-        
-        logger.info(f"Using TradingView URL: {final_url}")
-        
-        return final_url
+        logger.info(f"Using TradingView URL: {url}")
+        return url
 
     async def _fetch_index_price(self, symbol: str) -> Optional[float]:
         """

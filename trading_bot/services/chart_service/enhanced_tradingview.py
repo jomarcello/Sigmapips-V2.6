@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple, List
+import os
+import json
+import time
 
 # TradingView TA bibliotheek
 from tradingview_ta import TA_Handler, Interval, Exchange
@@ -113,21 +116,46 @@ class EnhancedTradingView:
         results = {}
         daily_data = None
         
+        # Create a cache key for this request
+        cache_key = f"{symbol}_{','.join(sorted(timeframes))}"
+        
+        # Check if we have a recent cached result (cache for 5 minutes)
+        cache_file = os.path.join('data', 'cache', 'tradingview', f"{cache_key}.json")
+        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+        
+        try:
+            if os.path.exists(cache_file):
+                file_time = os.path.getmtime(cache_file)
+                if time.time() - file_time < 300:  # 5 minutes cache
+                    with open(cache_file, 'r') as f:
+                        cached_data = json.load(f)
+                        logger.info(f"[EnhancedTradingView] Using cached data for {symbol}")
+                        return cached_data
+        except Exception as cache_e:
+            logger.warning(f"[EnhancedTradingView] Cache read error: {str(cache_e)}")
+        
         try:
             # Formatteer symbool voor TradingView
             screener, exchange, tv_symbol = EnhancedTradingView._format_symbol(symbol)
             
             logger.info(f"[EnhancedTradingView] Getting data for {symbol} ({tv_symbol}) on multiple timeframes")
             
-            # First get daily data for true high/low
+            # Prioritize timeframes - only get what's absolutely necessary
+            # For most use cases, we only need daily data for high/low and the requested timeframe
+            essential_timeframes = []
             if "1d" in timeframes:
-                timeframes.remove("1d")
-                timeframes = ["1d"] + timeframes  # Ensure 1d is first
+                essential_timeframes.append("1d")
             else:
-                timeframes = ["1d"] + timeframes  # Add 1d if not present
+                essential_timeframes.append("1d")  # Always need daily for high/low
             
-            # Get data for each timeframe
+            # Add the most important requested timeframe (usually the first non-daily one)
             for tf in timeframes:
+                if tf != "1d" and tf not in essential_timeframes:
+                    essential_timeframes.append(tf)
+                    break
+            
+            # Get data for essential timeframes only
+            for tf in essential_timeframes:
                 interval = EnhancedTradingView._map_timeframe(tf)
                 
                 try:
@@ -144,12 +172,23 @@ class EnhancedTradingView:
                         # Save daily data separately
                         daily_data = analysis
                         
-                    # Store the results
+                    # Store the results - only keep essential indicators to reduce processing time
                     results[tf] = {
                         "summary": analysis.summary,
                         "oscillators": analysis.oscillators,
                         "moving_averages": analysis.moving_averages,
-                        "indicators": analysis.indicators,
+                        "indicators": {
+                            # Only keep essential indicators
+                            "close": analysis.indicators.get("close"),
+                            "open": analysis.indicators.get("open"),
+                            "high": analysis.indicators.get("high"),
+                            "low": analysis.indicators.get("low"),
+                            "volume": analysis.indicators.get("volume"),
+                            "Recommend.All": analysis.indicators.get("Recommend.All"),
+                            "Recommend.MA": analysis.indicators.get("Recommend.MA"),
+                            "RSI": analysis.indicators.get("RSI"),
+                            "RSI[1]": analysis.indicators.get("RSI[1]")
+                        }
                     }
                     
                     logger.info(f"[EnhancedTradingView] Successfully retrieved {tf} data for {symbol}")
@@ -167,7 +206,7 @@ class EnhancedTradingView:
                 current_price = daily_indicators.get("close", None)
                 
                 # Store the final result with all timeframes data
-                return {
+                final_result = {
                     "symbol": symbol,
                     "daily_high": true_daily_high,
                     "daily_low": true_daily_low,
@@ -175,6 +214,15 @@ class EnhancedTradingView:
                     "timeframes": results,
                     "recommendation": daily_data.summary.get("RECOMMENDATION", "NEUTRAL")
                 }
+                
+                # Cache the result
+                try:
+                    with open(cache_file, 'w') as f:
+                        json.dump(final_result, f)
+                except Exception as cache_write_e:
+                    logger.warning(f"[EnhancedTradingView] Cache write error: {str(cache_write_e)}")
+                
+                return final_result
             else:
                 logger.error(f"[EnhancedTradingView] Could not get daily data for {symbol}")
                 return {
