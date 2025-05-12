@@ -152,13 +152,11 @@ IMPACT_EMOJI = {
 
 class EconomicCalendarService:
     """
-    Service for retrieving economic calendar data from ForexFactory or TradingView API.
+    Economic calendar service that provides economic event data.
     
-    This service provides methods to fetch and format economic calendar events
-    for display in various formats. It uses the ForexFactory as the primary
-    data source with fallback to TradingView API.
+    This service uses ForexFactory as the primary data source.
     """
-    
+
     def __init__(self):
         """
         Initialize the calendar service with the ForexFactory implementation.
@@ -168,261 +166,128 @@ class EconomicCalendarService:
         """
         self.logger = logging.getLogger(__name__)
         
-        # Initialize ForexFactory calendar service with fallback to TradingView
+        # Initialize ForexFactory calendar service
         self.forexfactory_service = None
-        self.tradingview_service = None
         
         # Enable fallback mode if environment variable is set
         self.use_fallback = os.environ.get("CALENDAR_FALLBACK", "").lower() in ("true", "1", "yes")
         if self.use_fallback:
             self.logger.info("Calendar fallback mode is enabled")
         
-        # Check if ForexFactory is explicitly disabled
-        use_forexfactory = os.environ.get("USE_FOREXFACTORY_CALENDAR", "").lower() not in ("false", "0", "no")
-        
-        # Try to initialize TradingView calendar service first
+        # Initialize ForexFactory calendar service
         try:
-            from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
-            self.tradingview_service = TradingViewCalendarService()
-            self.logger.info("TradingView calendar service initialized")
+            from trading_bot.services.calendar_service.forexfactory_calendar import ForexFactoryCalendarService
+            self.forexfactory_service = ForexFactoryCalendarService()
+            self.logger.info("ForexFactory calendar service initialized")
         except Exception as e:
-            self.logger.warning(f"Could not initialize TradingView calendar service: {str(e)}")
-            self.logger.debug(traceback.format_exc())
+            self.logger.error(f"Failed to initialize ForexFactory calendar service: {str(e)}")
+            self.logger.error(traceback.format_exc())
         
-        # Try to initialize ForexFactory calendar service if not disabled
-        if use_forexfactory and HAS_FOREXFACTORY:
-            try:
-                self.forexfactory_service = ForexFactoryCalendarService()
-                self.logger.info("ForexFactory calendar service initialized")
-            except Exception as e:
-                self.logger.warning(f"Could not initialize ForexFactory calendar service: {str(e)}")
-                self.logger.debug(traceback.format_exc())
-        
-        # Use TradingView as primary, with ForexFactory as fallback
-        if self.tradingview_service:
-            self.calendar_service = self.tradingview_service
-            self.logger.info("Using TradingView API for economic calendar")
-        elif self.forexfactory_service:
-            self.calendar_service = self.forexfactory_service
-            self.logger.info("Using ForexFactory for economic calendar")
-        else:
-            self.logger.error("No calendar service available!")
-            self.calendar_service = None
-        
-        # Setup caching
-        self.cache = {}
-        self.cache_time = {}
-        self.cache_expiry = 3600  # 1 hour in seconds
-        
-        # Define loading GIF URLs
-        self.loading_gif = "https://media.giphy.com/media/dpjUltnOPye7azvAhH/giphy.gif"
+        # Set the primary calendar service
+        self.calendar_service = self.forexfactory_service
+        self.logger.info("Using ForexFactory for economic calendar")
     
-    def _get_service_name(self, service):
+    async def get_calendar(self, days_ahead: int = 0, min_impact: str = "Low", currency: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Get the name of the service for logging purposes.
+        Get economic calendar events.
         
         Args:
-            service: The service instance to get the name for
-            
-        Returns:
-            String name of the service
-        """
-        if service is None:
-            return "None"
-        elif isinstance(service, ForexFactoryCalendarService):
-            return "ForexFactory"
-        else:
-            return "TradingView"
-    
-    def get_loading_gif(self) -> str:
-        """
-        Get the URL for the loading GIF to display during API calls.
+            days_ahead: Number of days ahead to fetch events for
+            min_impact: Minimum impact level to include (Low, Medium, High)
+            currency: Filter by currency code (e.g., USD, EUR)
         
         Returns:
-            URL string for the loading GIF
-        """
-        return self.loading_gif
-        
-    async def get_economic_calendar(self, currencies: List[str] = None, days_ahead: int = 0, min_impact: str = "Low") -> str:
-        """
-        Get the economic calendar formatted for display.
-        
-        Args:
-            currencies: List of currencies to filter events by
-            days_ahead: Number of days to look ahead (0=today, 1=tomorrow, etc.)
-            min_impact: Minimum impact level to include ("Low", "Medium", "High")
-            
-        Returns:
-            Formatted calendar string for display
-        """
-        self.logger.info(f"Getting economic calendar (currencies={currencies}, days_ahead={days_ahead}, min_impact={min_impact})")
-        
-        if self.calendar_service is None:
-            self.logger.error("No calendar service available")
-            return "❌ Economic calendar service is not available."
-        
-        try:
-            # Get calendar events
-            events = await self.get_calendar(days_ahead, min_impact, currencies[0] if currencies and len(currencies) == 1 else None)
-            
-            if not events:
-                self.logger.warning("No calendar events found")
-                return "No economic events found for the selected criteria."
-            
-            # Format calendar events
-            if HAS_CHRONOLOGICAL_FORMATTER:
-                # Use chronological formatter if available
-                today_formatted = datetime.now().strftime("%A, %d %B %Y")
-                
-                # If we have a single currency, use chronological format
-                # If we have multiple currencies, group by currency
-                group_by_currency = currencies is not None and len(currencies) > 1
-                
-                formatted_calendar = await self.calendar_service.format_calendar_chronologically(
-                    events, today_formatted, group_by_currency)
-            else:
-                # Fall back to simple formatting
-                formatted_calendar = await format_calendar_for_telegram(events)
-            
-            return formatted_calendar
-            
-        except Exception as e:
-            self.logger.error(f"Error getting economic calendar: {str(e)}")
-            self.logger.debug(traceback.format_exc())
-            return f"❌ Error retrieving economic calendar: {str(e)}"
-    
-    async def get_calendar(self, days_ahead: int = 0, min_impact: str = "Low", currency: str = None) -> List[Dict]:
-        """
-        Get calendar events from the API or cache.
-        
-        Args:
-            days_ahead: Number of days to look ahead (0=today, 1=tomorrow, etc.)
-            min_impact: Minimum impact level to include ("Low", "Medium", "High")
-            currency: Optional currency to filter events by
-            
-        Returns:
-            List of calendar events as dictionaries
+            List of economic calendar events
         """
         self.logger.info(f"Getting calendar (days_ahead={days_ahead}, min_impact={min_impact}, currency={currency})")
         
-        if self.calendar_service is None:
+        if not self.calendar_service:
             self.logger.error("No calendar service available")
             return []
         
-        # Check cache
-        cache_key = f"{days_ahead}_{min_impact}_{currency}"
-        if cache_key in self.cache and cache_key in self.cache_time:
-            if time.time() - self.cache_time[cache_key] < self.cache_expiry:
-                self.logger.info(f"Using cached calendar data for {cache_key}")
-                return self.cache[cache_key]
-        
         try:
-            # Get events from calendar service
             events = await self.calendar_service.get_calendar(days_ahead, min_impact, currency)
-            
-            # Cache results
-            self.cache[cache_key] = events
-            self.cache_time[cache_key] = time.time()
-            
+            self.logger.info(f"Retrieved {len(events)} events from ForexFactory")
             return events
         except Exception as e:
             self.logger.error(f"Error getting calendar: {str(e)}")
-            self.logger.debug(traceback.format_exc())
-            
-            # If fallback is enabled, generate fallback events
-            if self.use_fallback:
-                self.logger.info("Using fallback calendar data")
-                return self._generate_fallback_events(currency)
-            
+            self.logger.error(traceback.format_exc())
             return []
     
-    def _generate_fallback_events(self, currency=None) -> List[Dict]:
+    async def get_economic_calendar(self, days_ahead: int = 0, min_impact: str = "Low", currency: Optional[str] = None) -> str:
         """
-        Generate fallback events for when the API is unavailable.
+        Get formatted economic calendar as a string.
         
         Args:
-            currency: Optional currency to filter events by
-            
+            days_ahead: Number of days ahead to fetch events for
+            min_impact: Minimum impact level to include (Low, Medium, High)
+            currency: Filter by currency code (e.g., USD, EUR)
+        
         Returns:
-            List of fallback events as dictionaries
+            Formatted economic calendar as a string
         """
-        self.logger.info(f"Generating fallback events for currency {currency}")
+        events = await self.get_calendar(days_ahead, min_impact, currency)
         
-        # If the calendar service has a fallback method, use it
-        if hasattr(self.calendar_service, '_generate_fallback_events'):
-            return self.calendar_service._generate_fallback_events(currency)
+        if not events:
+            return "No economic events found."
         
-        # Otherwise, generate simple fallback events
-        now = datetime.now()
-        events = []
+        # Format the calendar
+        from trading_bot.services.calendar_service import IMPACT_EMOJI
         
-        # Generate a few events for today
-        currencies = [currency] if currency else MAJOR_CURRENCIES
+        # Get today's date for highlighting today's events
+        today = datetime.now().strftime("%Y-%m-%d")
         
-        for curr in currencies[:3]:  # Limit to 3 currencies to avoid too many events
-            events.append({
-                'title': f"{curr} Fallback Economic Data",
-                'country': curr[:2],  # First two letters as country code
-                'currency': curr,
-                'date': now.strftime("%Y-%m-%dT%H:%M:%S"),
-                'impact': "Medium",
-                'forecast': "N/A",
-                'previous': "N/A",
-                'actual': "N/A"
-            })
+        # Format the calendar
+        calendar_text = "📅 *Economic Calendar*\n\n"
         
-        return events
-    
-    async def get_events_for_instrument(self, instrument: str, days_ahead: int = 0, min_impact: str = "Low") -> Dict[str, Any]:
-        """
-        Get events for a specific trading instrument.
+        # Group events by date
+        events_by_date = {}
+        for event in events:
+            date = event.get("date", "Unknown")
+            if date not in events_by_date:
+                events_by_date[date] = []
+            events_by_date[date].append(event)
         
-        Args:
-            instrument: The instrument to get events for (e.g., "EURUSD")
-            days_ahead: Number of days to look ahead
-            min_impact: Minimum impact level to include
+        # Sort dates
+        sorted_dates = sorted(events_by_date.keys())
+        
+        # Format events by date
+        for date in sorted_dates:
+            date_events = events_by_date[date]
             
-        Returns:
-            Dictionary with events grouped by currency
-        """
-        self.logger.info(f"Getting events for instrument {instrument}")
-        
-        # Get currencies for instrument
-        currencies = INSTRUMENT_CURRENCY_MAP.get(instrument, [])
-        if not currencies:
-            self.logger.warning(f"No currencies found for instrument {instrument}")
-            return {"events": [], "explanation": f"No currency data available for {instrument}"}
-        
-        # Get events for each currency
-        result = {"events": [], "currencies": currencies, "explanation": f"Economic events for {instrument}"}
-        for currency in currencies:
-            events = await self.get_calendar(days_ahead, min_impact, currency)
-            if events:
-                result["events"].extend(events)
-        
-        return result
-    
-    async def get_instrument_calendar(self, instrument: str, days_ahead: int = 0, min_impact: str = "Low") -> str:
-        """
-        Get formatted calendar for a specific trading instrument.
-        
-        Args:
-            instrument: The instrument to get events for (e.g., "EURUSD")
-            days_ahead: Number of days to look ahead
-            min_impact: Minimum impact level to include
+            # Add date header
+            is_today = date == today
+            date_header = f"*{date}* {'(Today)' if is_today else ''}"
+            calendar_text += f"📆 {date_header}\n"
             
-        Returns:
-            Formatted calendar string for display
-        """
-        self.logger.info(f"Getting instrument calendar for {instrument}")
+            # Sort events by time
+            date_events.sort(key=lambda e: e.get("time", "00:00"))
+            
+            # Add events
+            for event in date_events:
+                time = event.get("time", "")
+                currency = event.get("currency", "")
+                impact = event.get("impact", "Low")
+                title = event.get("title", "")
+                forecast = event.get("forecast", "")
+                previous = event.get("previous", "")
+                
+                # Get emoji for impact
+                impact_emoji = IMPACT_EMOJI.get(impact, "⚪")
+                
+                # Format the event
+                event_text = f"{time} {currency} {impact_emoji} {title}"
+                if forecast:
+                    event_text += f" (Forecast: {forecast})"
+                if previous:
+                    event_text += f" (Previous: {previous})"
+                
+                calendar_text += f"• {event_text}\n"
+            
+            # Add separator between dates
+            calendar_text += "\n"
         
-        # Get currencies for instrument
-        currencies = INSTRUMENT_CURRENCY_MAP.get(instrument, [])
-        if not currencies:
-            return f"No currency data available for {instrument}."
-        
-        # Get economic calendar for these currencies
-        return await self.get_economic_calendar(currencies, days_ahead, min_impact)
+        return calendar_text
 
 # Telegram service class for sending calendar updates
 class TelegramService:
