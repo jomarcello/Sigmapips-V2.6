@@ -498,14 +498,46 @@ class TradingViewCalendarService:
             # Parse de JSON-respons
             data = json.loads(response_text)
             
-            # Check of de response de juiste structuur heeft
-            if isinstance(data, dict) and 'data' in data:
+            # Debug logging to see the actual structure
+            logger.info(f"API Response Type: {type(data)}")
+            logger.info(f"API Response Keys: {data.keys() if isinstance(data, dict) else 'Not a dict'}")
+            logger.info(f"API Response Sample: {str(data)[:500]}...")
+            
+            # Check of de response de juiste structuur heeft - Updated for new API response format
+            if isinstance(data, dict) and 'result' in data:
+                # The TradingView API now returns a 'result' key containing the events
+                items = data.get('result', [])
+                logger.info(f"Found events in 'result' key: {len(items)} items")
+            elif isinstance(data, dict) and 'data' in data:
+                # Keep backward compatibility with old format
                 items = data.get('data', [])
+                logger.info(f"Found events in 'data' key: {len(items)} items")
             elif isinstance(data, list):
+                # Direct list of events
                 items = data
+                logger.info(f"Found events in direct list: {len(items)} items")
             else:
                 logger.warning(f"Unexpected response format: {type(data)}")
-                return []
+                # Try to extract data from the actual structure
+                if isinstance(data, dict):
+                    # Check for common keys that might contain events
+                    for potential_key in ['events', 'items', 'calendar', 'result']:
+                        if potential_key in data and isinstance(data[potential_key], list):
+                            items = data[potential_key]
+                            logger.info(f"Found events in key: {potential_key}")
+                            break
+                    else:
+                        # If no known keys, try the first list value we find
+                        for key, value in data.items():
+                            if isinstance(value, list) and value:
+                                items = value
+                                logger.info(f"Using list from key: {key}")
+                                break
+                        else:
+                            logger.error("Could not find any suitable list in response")
+                            return []
+                else:
+                    return []
             
             if not items:
                 logger.warning("No events found in the response")
@@ -524,6 +556,9 @@ class TradingViewCalendarService:
             # Verwerk elk event
             for item in items:
                 try:
+                    # Debug log the item structure
+                    logger.info(f"Event item structure: {item.keys() if isinstance(item, dict) else 'Not a dict'}")
+                    
                     # Extract relevante informatie
                     country_code = item.get('country')
                     if not country_code:
