@@ -221,13 +221,16 @@ class TradingViewCalendarService:
         query_string = urllib.parse.urlencode(params)
         full_url = f"{url}?{query_string}"
         
+        # Log the full URL for debugging
+        logger.info(f"Full URL for ScrapingAnt request: {full_url}")
+        
         # Log the API key to verify it's not empty
         masked_key = f"{self.scrapingant_api_key[:5]}...{self.scrapingant_api_key[-3:]}" if len(self.scrapingant_api_key) > 8 else "[masked]"
         logger.info(f"Using ScrapingAnt API key: {masked_key}")
         
-        # Bereid ScrapingAnt request parameters voor
+        # Bereid ScrapingAnt request parameters voor - zorg dat 'url' correct is
         scrapingant_params = {
-            "url": full_url,
+            "url": urllib.parse.quote(full_url, safe=''),  # Ensure URL is properly encoded
             "browser": True,
             "return_page_source": True,
             "headers": {
@@ -239,18 +242,29 @@ class TradingViewCalendarService:
             }
         }
         
-        logger.info(f"ScrapingAnt parameters: {json.dumps({k: v for k, v in scrapingant_params.items() if k != 'x-api-key'})}")
+        # Log de parameters voor debugging (zonder API key)
+        logger.info(f"ScrapingAnt parameters: {json.dumps(scrapingant_params, ensure_ascii=False)}")
         
         # Maak request naar ScrapingAnt
         await self._ensure_session()
         try:
-            # Add API key to headers instead of body
-            headers = {"x-api-key": self.scrapingant_api_key}
+            # According to ScrapingAnt docs, the API key should be passed as a query parameter
+            # Add API key to the URL as a query parameter
+            scrapingant_url_with_key = f"{self.scrapingant_url}?x-api-key={self.scrapingant_api_key}"
+            
+            # Validate the JSON request body before sending
+            try:
+                # Ensure the request body is valid JSON
+                request_json = json.dumps(scrapingant_params)
+                json.loads(request_json)  # Validate JSON
+                logger.info("ScrapingAnt request body validated as valid JSON")
+            except json.JSONDecodeError as je:
+                logger.error(f"Invalid JSON in ScrapingAnt request body: {je}")
+                return None
             
             async with self.session.post(
-                self.scrapingant_url,
+                scrapingant_url_with_key,
                 json=scrapingant_params,
-                headers=headers,
                 timeout=aiohttp.ClientTimeout(total=60)
             ) as response:
                 logger.info(f"ScrapingAnt response status: {response.status}")
