@@ -89,6 +89,7 @@ class ForexFactoryCalendarService:
                 logger.info(f"Running ForexFactory calendar script for date {date_str}")
                 # Run the script to fetch fresh data
                 process = await asyncio.create_subprocess_exec(
+                    "python",
                     self.script_path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
@@ -109,42 +110,54 @@ class ForexFactoryCalendarService:
                 # Process and filter the data
                 events = []
                 
-                # Check if data is a list or a dict
+                # Check if data is a list or a dict with events
                 if isinstance(data, list):
                     # Each event is a dictionary in the list
-                    for event in data:
-                        if not isinstance(event, dict):
-                            continue
-                            
-                        # Convert impact level
+                    raw_events = data
+                elif isinstance(data, dict) and 'events' in data:
+                    # The data is in the format {"date": "...", "events": [...]}
+                    raw_events = data['events']
+                else:
+                    logger.error(f"Unexpected data format in {json_file}")
+                    return []
+                
+                # Process each event
+                for event in raw_events:
+                    if not isinstance(event, dict):
+                        continue
+                        
+                    # Convert impact level to standard format
+                    impact_level = event.get("impact", "Low")
+                    # Handle both string format and emoji format
+                    if impact_level == "🔴" or impact_level == "High":
+                        impact_level = "High"
+                    elif impact_level == "🟠" or impact_level == "Medium":
+                        impact_level = "Medium"
+                    else:
                         impact_level = "Low"
-                        if event.get("impact") == "🔴":
-                            impact_level = "High"
-                        elif event.get("impact") == "🟠":
-                            impact_level = "Medium"
-                        
-                        # Check if event meets minimum impact level
-                        if (min_impact == "High" and impact_level != "High") or \
-                        (min_impact == "Medium" and impact_level == "Low"):
-                            continue
-                        
-                        # Check if event is for the specified currency
-                        if currency and event.get("currency", "").upper() != currency.upper():
-                            continue
-                        
-                        # Add the event
-                        events.append({
-                            "title": event.get("event", ""),
-                            "country": event.get("country", ""),
-                            "currency": event.get("currency", ""),
-                            "importance": impact_level,
-                            "impact": event.get("impact", ""),
-                            "time": event.get("time", ""),
-                            "actual": event.get("actual", ""),
-                            "forecast": event.get("forecast", ""),
-                            "previous": event.get("previous", ""),
-                            "date": target_date.strftime("%Y-%m-%d")
-                        })
+                    
+                    # Check if event meets minimum impact level
+                    if (min_impact == "High" and impact_level != "High") or \
+                    (min_impact == "Medium" and impact_level == "Low"):
+                        continue
+                    
+                    # Check if event is for the specified currency
+                    if currency and event.get("currency", "").upper() != currency.upper():
+                        continue
+                    
+                    # Add the event
+                    events.append({
+                        "title": event.get("event", ""),
+                        "country": event.get("country", ""),
+                        "currency": event.get("currency", ""),
+                        "importance": impact_level,
+                        "impact": IMPACT_EMOJI.get(impact_level, "🟡"),
+                        "time": event.get("time", ""),
+                        "actual": event.get("actual", ""),
+                        "forecast": event.get("forecast", ""),
+                        "previous": event.get("previous", ""),
+                        "date": target_date.strftime("%Y-%m-%d")
+                    })
                 
                 logger.info(f"Retrieved {len(events)} events from ForexFactory")
                 return events
