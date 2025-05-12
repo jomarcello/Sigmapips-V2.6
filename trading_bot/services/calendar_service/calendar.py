@@ -177,31 +177,37 @@ class EconomicCalendarService:
         if self.use_fallback:
             self.logger.info("Calendar fallback mode is enabled")
         
-        # Try to initialize ForexFactory calendar service
+        # Check if ForexFactory is explicitly disabled
+        use_forexfactory = os.environ.get("USE_FOREXFACTORY_CALENDAR", "").lower() not in ("false", "0", "no")
+        
+        # Try to initialize TradingView calendar service first
         try:
-            if HAS_FOREXFACTORY:
-                self.forexfactory_service = ForexFactoryCalendarService()
-                self.logger.info("ForexFactory calendar service initialized")
+            from trading_bot.services.calendar_service.tradingview_calendar import TradingViewCalendarService
+            self.tradingview_service = TradingViewCalendarService()
+            self.logger.info("TradingView calendar service initialized")
         except Exception as e:
-            self.logger.warning(f"Could not initialize ForexFactory calendar service: {str(e)}")
+            self.logger.warning(f"Could not initialize TradingView calendar service: {str(e)}")
             self.logger.debug(traceback.format_exc())
         
-        # Try to initialize TradingView calendar service as fallback
-        if self.forexfactory_service is None:
+        # Try to initialize ForexFactory calendar service if not disabled
+        if use_forexfactory and HAS_FOREXFACTORY:
             try:
-                self.tradingview_service = TradingViewCalendarService()
-                self.logger.info("TradingView calendar service initialized as fallback")
+                self.forexfactory_service = ForexFactoryCalendarService()
+                self.logger.info("ForexFactory calendar service initialized")
             except Exception as e:
-                self.logger.warning(f"Could not initialize TradingView calendar service: {str(e)}")
+                self.logger.warning(f"Could not initialize ForexFactory calendar service: {str(e)}")
                 self.logger.debug(traceback.format_exc())
         
-        # Use ForexFactory as primary, with TradingView as fallback
-        if self.forexfactory_service:
+        # Use TradingView as primary, with ForexFactory as fallback
+        if self.tradingview_service:
+            self.calendar_service = self.tradingview_service
+            self.logger.info("Using TradingView API for economic calendar")
+        elif self.forexfactory_service:
             self.calendar_service = self.forexfactory_service
             self.logger.info("Using ForexFactory for economic calendar")
         else:
-            self.calendar_service = self.tradingview_service
-            self.logger.info("Using TradingView API for economic calendar")
+            self.logger.error("No calendar service available!")
+            self.calendar_service = None
         
         # Setup caching
         self.cache = {}

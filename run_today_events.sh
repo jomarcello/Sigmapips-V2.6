@@ -65,7 +65,8 @@ if [ $SCRIPT_EXIT_CODE -eq 0 ]; then
                 cat "forex_factory_events_${LATEST_DATE}.txt"
             else
                 echo "Preview of data:"
-                head -n 20 "$LATEST_JSON"
+                # Show all data instead of just the first 20 lines
+                cat "$LATEST_JSON"
             fi
         fi
     fi
